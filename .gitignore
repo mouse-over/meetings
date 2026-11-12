@@ -1,0 +1,16 @@
+# Never commit meeting data or anything derived from it
+*.wav
+*.mp3
+*.m4a
+*.mp4
+*.vtt
+*.srt
+out/
+data/
+# Downloaded models and environments
+models/
+*.onnx
+*.tar.bz2
+.venv/
+__pycache__/
+.DS_Store
