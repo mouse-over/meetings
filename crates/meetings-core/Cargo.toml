@@ -1,0 +1,25 @@
+[package]
+name = "meetings-core"
+description = "Local meeting transcription with speaker diarization (audio, diarization, ASR, assembly, VTT)"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+# whisper.cpp on the GPU via Metal (macOS)
+metal = ["whisper-rs/metal"]
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+symphonia.workspace = true
+rubato.workspace = true
+whisper-rs.workspace = true
+sherpa-onnx.workspace = true
+dirs.workspace = true
+sha2.workspace = true
+ureq.workspace = true

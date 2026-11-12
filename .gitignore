@@ -14,3 +14,8 @@ models/
 .venv/
 __pycache__/
 .DS_Store
+# Rust
+target/
+# Local evaluation outputs (keep meeting-derived data out of the repo)
+eval/
+*.meetings.json
