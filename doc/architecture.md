@@ -9,7 +9,7 @@ on top of the same library.
 ```text
 crates/mo-meetings-core   library: audio, diarization, ASR, chunking, assembly, VTT/JSON, models, pipeline
 crates/mo-meetings-cli    binary `mo-meetings` (clap): transcribe, diarize, models list|download|path
-apps/desktop           (M1, planned) Tauri v2 app using mo-meetings-core directly
+apps/desktop           (M1) Tauri v2 app using mo-meetings-core directly; src-tauri/ is the crate, Vite + TS front-end
 crates/mo-meetings-mcp    binary `mo-meetings-mcp`: MCP server over stdio (rmcp) exposing transcribe/diarize as tools
 ```
 
@@ -102,7 +102,10 @@ When the request carries a progress token, `pipeline::Progress` is forwarded as 
 0-100 scale (load 0-5, decode 5-10, diarize 10-40, ASR 40-95 by audio seconds, assembly 95-100). Errors come back
 as tool results with `isError`; a missing model names `mo-meetings models download`.
 
-## Desktop app (planned)
+## Desktop app
+
+Scaffolded: `apps/desktop` opens an empty window (Vite + vanilla TypeScript front-end, `src-tauri/` in the Cargo
+workspace). Planned:
 
 - **Tauri v2 app** (`apps/desktop`): Rust side calls `pipeline::run` on a worker thread and forwards `Progress` as
   events; front-end shows stages and chunk progress, plays the recording (HTML `<video>`/`<audio>` from a local

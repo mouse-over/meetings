@@ -1,6 +1,8 @@
 [workspace]
 resolver = "3"
-members = ["crates/mo-meetings-core", "crates/mo-meetings-cli", "crates/mo-meetings-mcp"]
+members = ["crates/mo-meetings-core", "crates/mo-meetings-cli", "crates/mo-meetings-mcp", "apps/desktop/src-tauri"]
+# Plain `cargo build` skips the desktop app (needs Rust 1.90 and, on Linux, webkit2gtk); `--workspace` includes it.
+default-members = ["crates/mo-meetings-core", "crates/mo-meetings-cli", "crates/mo-meetings-mcp"]
 
 [workspace.package]
 version = "0.1.0"
