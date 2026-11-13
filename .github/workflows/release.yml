@@ -1,7 +1,8 @@
 name: release
 
 # Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml) to build the CLI and the MCP server, smoke-test
-# the archives on fresh runners and publish a GitHub release. Pull requests that touch this file run build + smoke test only.
+# the archives on fresh runners and publish a GitHub release. Pull requests that touch this file run build + smoke
+# test only.
 on:
   push:
     tags: ["v*"]
