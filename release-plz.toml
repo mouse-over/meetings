@@ -1,6 +1,6 @@
 # release-plz (https://release-plz.dev): conventional commits on main -> release PR (version bump + CHANGELOG.md);
 # merging it pushes tag vX.Y.Z, which runs .github/workflows/release.yml (build, smoke test, GitHub release).
-# Both crates share the workspace version, so there is one tag and one changelog, owned by the CLI.
+# All crates share the workspace version, so there is one tag and one changelog, owned by the CLI.
 [workspace]
 # Not published to crates.io: the current version comes from the latest vX.Y.Z tag.
 git_only = true
@@ -17,11 +17,18 @@ name = "mo-meetings-cli"
 git_tag_name = "v{{ version }}"
 changelog_path = "CHANGELOG.md"
 # Most changes land in the library; list them in the CLI changelog and let them trigger a release.
-changelog_include = ["mo-meetings-core"]
+changelog_include = ["mo-meetings-core", "mo-meetings-mcp"]
 version_group = "workspace"
 
 [[package]]
 name = "mo-meetings-core"
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+changelog_update = false
+version_group = "workspace"
+
+[[package]]
+name = "mo-meetings-mcp"
 git_tag_name = "v{{ version }}"
 git_tag_enable = false
 changelog_update = false
