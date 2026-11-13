@@ -29,6 +29,10 @@ jobs:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
             cargo_flags: --no-default-features
+          # CPU only; sherpa-onnx static (/MT) and the C runtime linked statically too (.cargo/config.toml).
+          - target: x86_64-pc-windows-msvc
+            os: windows-2025
+            cargo_flags: --no-default-features
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -54,7 +58,8 @@ jobs:
         run: |
           name="mo-meetings-${{ steps.version.outputs.version }}-${{ matrix.target }}"
           mkdir -p "dist/$name"
-          cp target/release/mo-meetings README.md NOTICE "dist/$name/"
+          if [[ "$RUNNER_OS" == Windows ]]; then exe=.exe; fi
+          cp "target/release/mo-meetings$exe" README.md NOTICE "dist/$name/"
           if [[ "$RUNNER_OS" == macOS ]]; then
             # The binary's rpath is @executable_path/onnxruntime, then @executable_path. build.rs only warns when
             # it cannot fetch Microsoft's onnxruntime; a release without it would be ~2.3x slower, so fail here.
@@ -62,15 +67,21 @@ jobs:
             cp target/release/libsherpa-onnx-c-api.dylib "dist/$name/"
             cp -R target/release/onnxruntime "dist/$name/"
           fi
-          tar -C dist -czf "dist/$name.tar.gz" "$name"
-          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
-          echo "ARCHIVE=$name" >> "$GITHUB_ENV"
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            archive="$name.zip"
+            (cd dist && 7z a -tzip "$archive" "$name" > /dev/null && sha256sum "$archive" > "$archive.sha256")
+          else
+            archive="$name.tar.gz"
+            tar -C dist -czf "dist/$archive" "$name"
+            (cd dist && shasum -a 256 "$archive" > "$archive.sha256")
+          fi
+          echo "ARCHIVE=$archive" >> "$GITHUB_ENV"
       - uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.target }}
           path: |
-            dist/${{ env.ARCHIVE }}.tar.gz
-            dist/${{ env.ARCHIVE }}.tar.gz.sha256
+            dist/${{ env.ARCHIVE }}
+            dist/${{ env.ARCHIVE }}.sha256
           if-no-files-found: error
 
   smoke:
@@ -84,6 +95,8 @@ jobs:
             os: macos-26
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-24.04
+          - target: x86_64-pc-windows-msvc
+            os: windows-2025
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/download-artifact@v8
@@ -92,9 +105,15 @@ jobs:
       - name: Verify, unpack and run
         shell: bash
         run: |
-          shasum -a 256 -c ./*.tar.gz.sha256
-          tar -xzf ./*.tar.gz
-          bin=$(echo mo-meetings-*/mo-meetings)
+          if [[ "$RUNNER_OS" == Windows ]]; then
+            sha256sum -c ./*.zip.sha256
+            7z x ./*.zip > /dev/null
+            bin=$(echo mo-meetings-*/mo-meetings.exe)
+          else
+            shasum -a 256 -c ./*.tar.gz.sha256
+            tar -xzf ./*.tar.gz
+            bin=$(echo mo-meetings-*/mo-meetings)
+          fi
           "$bin" --version
           MO_MEETINGS_MODELS_DIR="$RUNNER_TEMP/models" "$bin" models list
           if [[ "$RUNNER_OS" == macOS ]]; then
@@ -102,6 +121,13 @@ jobs:
             grep -E 'onnx|sherpa' <<<"$libs"
             grep -q "/mo-meetings-[^/]*/onnxruntime/libonnxruntime.dylib" <<<"$libs" \
               || { echo "::error::Microsoft onnxruntime from the archive was not loaded"; exit 1; }
+          elif [[ "$RUNNER_OS" == Windows ]]; then
+            # Runners have the VC++ redistributable, so running the binary does not prove it is self-contained.
+            deps=$(ldd "$bin")
+            echo "$deps"
+            if grep -qiE 'vcruntime|msvcp|onnx|sherpa|not found' <<<"$deps"; then
+              echo "::error::binary depends on DLLs that are not part of Windows"; exit 1
+            fi
           else
             deps=$(ldd "$bin")
             echo "$deps"

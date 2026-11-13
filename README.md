@@ -14,7 +14,7 @@ Rust 1.88+, CMake and a C/C++ toolchain (whisper.cpp is compiled from source). O
 
 ```sh
 cargo build --release                         # macOS (Metal)
-cargo build --release --no-default-features   # Linux / CPU only
+cargo build --release --no-default-features   # Linux, Windows (MSVC) / CPU only
 ```
 
 The sherpa-onnx build script downloads its prebuilt libraries; on Apple Silicon `mo-meetings-core`'s build script
@@ -26,7 +26,7 @@ If linking fails on macOS with `tapi error: malformed file … unknown architect
 Tools are older than the default SDK; point to an older SDK, e.g.
 `export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`.
 
-Prebuilt archives (macOS Apple Silicon with Metal, Linux x86_64 CPU) are attached to
+Prebuilt archives (macOS Apple Silicon with Metal, Linux x86_64 CPU, Windows x86_64 CPU) are attached to
 [GitHub releases](https://github.com/mouse-over/meetings/releases). Keep the files together: on macOS the binary
 loads `libsherpa-onnx-c-api.dylib` and `onnxruntime/` from its own directory. The binaries are not signed;
 after downloading in a browser run `xattr -dr com.apple.quarantine mo-meetings-*/`.
@@ -50,7 +50,8 @@ A glossary prompt helps whisper with domain terms and names; it is sent with eve
 Schůzka o vývoji aplikace. Termíny: backend, frontend, deploy, pull request, sprint, backlog, Kubernetes.
 ```
 
-Models live in `~/Library/Caches/mo-meetings/models` (macOS) or `~/.cache/mo-meetings/models` (Linux); override
+Models live in `~/Library/Caches/mo-meetings/models` (macOS) `~/.cache/mo-meetings/models` (Linux) or
+`%LOCALAPPDATA%\mo-meetings\models` (Windows); override
 with `MO_MEETINGS_MODELS_DIR`. None of them is gated, no Hugging Face token is needed. Licenses: whisper MIT,
 segmentation-3.0 MIT (© CNRS), TitaNet-Large CC-BY-4.0 (attribution NVIDIA); see [`NOTICE`](NOTICE).
 
