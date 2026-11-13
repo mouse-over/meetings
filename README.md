@@ -26,6 +26,11 @@ If linking fails on macOS with `tapi error: malformed file … unknown architect
 Tools are older than the default SDK; point to an older SDK, e.g.
 `export SDKROOT=/Library/Developer/CommandLineTools/SDKs/MacOSX26.5.sdk`.
 
+Prebuilt archives (macOS Apple Silicon with Metal, Linux x86_64 CPU) are attached to
+[GitHub releases](https://github.com/mouse-over/meetings/releases). Keep the files together: on macOS the binary
+loads `libsherpa-onnx-c-api.dylib` and `onnxruntime/` from its own directory. The binaries are not signed;
+after downloading in a browser run `xattr -dr com.apple.quarantine mo-meetings-*/`.
+
 ## Use
 
 ```sh
@@ -56,6 +61,9 @@ cargo fmt --all && cargo clippy --workspace --all-targets -- -D warnings && carg
 MO_MEETINGS_TEST_AUDIO=/path/to/meeting.mp4 cargo test --release -p mo-meetings-core --features metal -- --ignored
 python3 -I scripts/eval.py LABEL dump.json teams.vtt   # score `transcribe --dump` against a Teams VTT
 ```
+
+Release: bump `version` in the root `Cargo.toml`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`;
+`.github/workflows/release.yml` builds, smoke-tests and publishes the archives.
 
 - `spikes/sherpa-diarization/`: does sherpa-onnx (ONNX) diarization match pyannote community-1? Results in
   [`RESULTS.md`](spikes/sherpa-diarization/RESULTS.md).

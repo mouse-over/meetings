@@ -1,0 +1,127 @@
+name: release
+
+# Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml) to build the CLI, smoke-test the archives on
+# fresh runners and publish a GitHub release. Pull requests that touch this file run build + smoke test only.
+on:
+  push:
+    tags: ["v*"]
+  pull_request:
+    paths: [".github/workflows/release.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Metal; sherpa-onnx as shared libraries + Microsoft's onnxruntime (see mo-meetings-core/build.rs).
+          - target: aarch64-apple-darwin
+            os: macos-15
+            cargo_flags: ""
+          # CPU only; sherpa-onnx linked statically. Oldest supported Ubuntu for a lower glibc requirement.
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-22.04
+            cargo_flags: --no-default-features
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install build dependencies
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y cmake libclang-dev
+      - name: Check tag matches the workspace version
+        id: version
+        shell: bash
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | jq -r '.packages[] | select(.name == "mo-meetings-cli") | .version')
+          if [[ "$GITHUB_REF_TYPE" == tag && "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match Cargo.toml version $version"
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: cargo build --release --locked -p mo-meetings-cli ${{ matrix.cargo_flags }}
+      - name: Package
+        shell: bash
+        run: |
+          name="mo-meetings-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          mkdir -p "dist/$name"
+          cp target/release/mo-meetings README.md NOTICE "dist/$name/"
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            # The binary's rpath is @executable_path/onnxruntime, then @executable_path. build.rs only warns when
+            # it cannot fetch Microsoft's onnxruntime; a release without it would be ~2.3x slower, so fail here.
+            test -f target/release/onnxruntime/libonnxruntime.dylib
+            cp target/release/libsherpa-onnx-c-api.dylib "dist/$name/"
+            cp -R target/release/onnxruntime "dist/$name/"
+          fi
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          (cd dist && shasum -a 256 "$name.tar.gz" > "$name.tar.gz.sha256")
+          echo "ARCHIVE=$name" >> "$GITHUB_ENV"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ${{ matrix.target }}
+          path: |
+            dist/${{ env.ARCHIVE }}.tar.gz
+            dist/${{ env.ARCHIVE }}.tar.gz.sha256
+          if-no-files-found: error
+
+  smoke:
+    # Fresh runners without the build tree: the archive must work on its own.
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            os: macos-26
+          - target: x86_64-unknown-linux-gnu
+            os: ubuntu-24.04
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ matrix.target }}
+      - name: Verify, unpack and run
+        shell: bash
+        run: |
+          shasum -a 256 -c ./*.tar.gz.sha256
+          tar -xzf ./*.tar.gz
+          bin=$(echo mo-meetings-*/mo-meetings)
+          "$bin" --version
+          MO_MEETINGS_MODELS_DIR="$RUNNER_TEMP/models" "$bin" models list
+          if [[ "$RUNNER_OS" == macOS ]]; then
+            libs=$(DYLD_PRINT_LIBRARIES=1 "$bin" --version 2>&1)
+            grep -E 'onnx|sherpa' <<<"$libs"
+            grep -q "/mo-meetings-[^/]*/onnxruntime/libonnxruntime.dylib" <<<"$libs" \
+              || { echo "::error::Microsoft onnxruntime from the archive was not loaded"; exit 1; }
+          else
+            deps=$(ldd "$bin")
+            echo "$deps"
+            if grep -q 'not found' <<<"$deps"; then echo "::error::missing shared libraries"; exit 1; fi
+          fi
+
+  release:
+    needs: smoke
+    if: github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --repo "$GITHUB_REPOSITORY" --verify-tag --generate-notes --title "$GITHUB_REF_NAME"
