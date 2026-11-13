@@ -7,8 +7,13 @@ body {
   margin: 0;
 }
 
+/* Keep `hidden` working on elements whose rules below set `display`. */
+[hidden] {
+  display: none !important;
+}
+
 main {
-  max-width: 56rem;
+  max-width: 72rem;
   margin: 0 auto;
   padding: 1.5rem;
   display: grid;
@@ -84,4 +89,107 @@ form {
   padding: 0;
   display: grid;
   gap: 0.5rem;
+}
+
+/* Video next to the transcript; audio-only recordings get a player bar above it. */
+#result {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-areas: "summary summary" "player cues";
+  gap: 0 1.25rem;
+  align-items: start;
+}
+
+#result.audio-only {
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "summary" "player" "cues";
+}
+
+#summary {
+  grid-area: summary;
+}
+
+#player {
+  grid-area: player;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding: 0.5rem 0;
+  background: Canvas;
+}
+
+#media {
+  display: block;
+  width: 100%;
+  border-radius: 0.375rem;
+  background: #000;
+}
+
+#result.audio-only #media {
+  height: 2.5rem;
+  background: none;
+}
+
+#media-error {
+  margin: 0.5rem 0 0;
+}
+
+#cues {
+  grid-area: cues;
+  margin: 0;
+  gap: 0.125rem;
+}
+
+.cue {
+  --speaker-color: hsl(var(--speaker-hue) 65% 40%);
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 0.125rem 0.5rem;
+  width: 100%;
+  padding: 0.375rem 0.625rem;
+  border: 0;
+  border-left: 3px solid var(--speaker-color);
+  border-radius: 0.25rem;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.cue:hover {
+  background: color-mix(in srgb, var(--speaker-color) 8%, transparent);
+}
+
+.cue[aria-current] {
+  background: color-mix(in srgb, var(--speaker-color) 20%, transparent);
+}
+
+.cue .time {
+  color: GrayText;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.875rem;
+}
+
+.cue .speaker {
+  color: var(--speaker-color);
+  font-weight: 600;
+  font-size: 0.875rem;
+}
+
+.cue .text {
+  grid-column: 1 / -1;
+}
+
+@media (prefers-color-scheme: dark) {
+  .cue {
+    --speaker-color: hsl(var(--speaker-hue) 70% 68%);
+  }
+}
+
+@media (max-width: 40rem) {
+  #result {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-areas: "summary" "player" "cues";
+  }
 }
