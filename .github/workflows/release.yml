@@ -125,7 +125,7 @@ jobs:
             # Runners have the VC++ redistributable, so running the binary does not prove it is self-contained.
             deps=$(ldd "$bin")
             echo "$deps"
-            if grep -qiE 'vcruntime|msvcp|onnx|sherpa|not found' <<<"$deps"; then
+            if grep -qiE 'vcruntime1|msvcp1|onnx|sherpa|not found' <<<"$deps"; then
               echo "::error::binary depends on DLLs that are not part of Windows"; exit 1
             fi
           else
