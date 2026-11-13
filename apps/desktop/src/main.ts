@@ -1,5 +1,6 @@
-// Pick a recording, set the options, run the pipeline in the back-end and follow its progress.
-import { invoke } from "@tauri-apps/api/core";
+// Pick a recording, set the options, run the pipeline in the back-end and follow its progress, then play the
+// recording next to its transcript.
+import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
 
@@ -37,7 +38,8 @@ const STAGES: [Stage, string][] = [
   ["assemble", "Assembling the transcript"],
 ];
 
-const EXTENSIONS = ["mp4", "m4a", "mov", "mkv", "webm", "wav", "mp3", "flac", "ogg", "aac", "aiff", "caf"];
+const AUDIO_EXTENSIONS = ["m4a", "wav", "mp3", "flac", "ogg", "aac", "aiff", "caf"];
+const EXTENSIONS = ["mp4", "mov", "mkv", "webm", ...AUDIO_EXTENSIONS];
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const form = $<HTMLFormElement>("run-form");
@@ -49,9 +51,16 @@ const chunkBar = $<HTMLProgressElement>("chunks");
 const chunkText = $("chunk-text");
 const errorBox = $("error");
 const resultBox = $("result");
+const media = $<HTMLVideoElement>("media");
+const mediaError = $("media-error");
+const cueList = $<HTMLOListElement>("cues");
 
 let path: string | null = null;
+/** The recording the shown transcript belongs to. */
+let runPath: string | null = null;
 let running = false;
+let cues: Cue[] = [];
+let activeCue = -1;
 
 function setRunning(on: boolean) {
   running = on;
@@ -107,18 +116,94 @@ function showResult(r: RunResult) {
   $("summary").textContent =
     `${clock(r.audioDurationS)} of audio, ${r.numSpeakers} speaker${r.numSpeakers === 1 ? "" : "s"}, ` +
     `${r.cues.length} cues, processed in ${r.processingS.toFixed(0)} s.`;
-  $("cues").replaceChildren(
-    ...r.cues.map((c) => {
+  cues = r.cues;
+  activeCue = -1;
+  cueList.replaceChildren(
+    ...cues.map((c, i) => {
       const li = document.createElement("li");
-      const meta = document.createElement("span");
-      meta.className = "muted";
-      meta.textContent = `${clock(c.start)} Speaker ${c.speaker}`;
-      li.append(meta, ` ${c.text}`);
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "cue";
+      button.dataset.index = String(i);
+      // Colour per speaker: golden-angle hue steps keep neighbouring speaker numbers far apart.
+      button.style.setProperty("--speaker-hue", String((c.speaker * 137.5 + 210) % 360));
+      const time = document.createElement("span");
+      time.className = "time";
+      time.textContent = clock(c.start);
+      const speaker = document.createElement("span");
+      speaker.className = "speaker";
+      speaker.textContent = `Speaker ${c.speaker}`;
+      const text = document.createElement("span");
+      text.className = "text";
+      text.textContent = c.text;
+      button.append(time, speaker, text);
+      li.append(button);
       return li;
     }),
   );
+  loadMedia(runPath);
   resultBox.hidden = false;
 }
+
+/** Plays the recording from the asset protocol; the dialog allowed the picked file in its scope. */
+function loadMedia(p: string | null) {
+  mediaError.hidden = true;
+  if (p === null) {
+    media.removeAttribute("src");
+    media.load();
+    return;
+  }
+  const src = convertFileSrc(p);
+  if (media.src === src) return;
+  // Guess from the extension until the metadata tells.
+  const ext = p.split(".").pop()?.toLowerCase() ?? "";
+  resultBox.classList.toggle("audio-only", AUDIO_EXTENSIONS.includes(ext));
+  media.src = src;
+}
+
+/** Index of the cue playing at `t`, or -1 between cues. */
+function cueAt(t: number): number {
+  let lo = 0;
+  let hi = cues.length - 1;
+  let found = -1;
+  while (lo <= hi) {
+    const mid = (lo + hi) >> 1;
+    if (cues[mid].start <= t) {
+      found = mid;
+      lo = mid + 1;
+    } else hi = mid - 1;
+  }
+  return found >= 0 && t < cues[found].end ? found : -1;
+}
+
+function setActiveCue(i: number) {
+  if (i === activeCue) return;
+  cueList.querySelector(".cue[aria-current]")?.removeAttribute("aria-current");
+  activeCue = i;
+  if (i < 0) return;
+  const button = cueList.querySelector<HTMLButtonElement>(`.cue[data-index="${i}"]`);
+  if (!button) return;
+  button.setAttribute("aria-current", "true");
+  button.scrollIntoView({ block: "center", behavior: "smooth" });
+}
+
+media.addEventListener("timeupdate", () => setActiveCue(cueAt(media.currentTime)));
+media.addEventListener("seeked", () => setActiveCue(cueAt(media.currentTime)));
+// Audio-only recordings (or a video file without a picture) keep just the player bar.
+media.addEventListener("loadedmetadata", () => resultBox.classList.toggle("audio-only", media.videoWidth === 0));
+media.addEventListener("error", () => {
+  if (media.getAttribute("src")) mediaError.hidden = false;
+});
+
+cueList.addEventListener("click", (ev) => {
+  const button = (ev.target as Element).closest<HTMLButtonElement>(".cue");
+  if (!button) return;
+  const i = Number(button.dataset.index);
+  // A hair past the start, so the seeked position falls inside this cue even when it starts where the previous ends.
+  media.currentTime = cues[i].start + 0.001;
+  setActiveCue(i);
+  void media.play().catch(() => {});
+});
 
 pickButton.addEventListener("click", async () => {
   const picked = await open({ multiple: false, directory: false, filters: [{ name: "Recordings", extensions: EXTENSIONS }] });
@@ -140,6 +225,8 @@ form.addEventListener("submit", async (ev) => {
   };
   errorBox.hidden = true;
   resultBox.hidden = true;
+  media.pause();
+  runPath = path;
   resetProgress();
   setRunning(true);
   try {
