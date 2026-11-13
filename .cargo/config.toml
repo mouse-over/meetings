@@ -1,0 +1,8 @@
+# sherpa-onnx ships Windows static libraries built with /MT; link the C runtime statically everywhere else too
+# (Rust and whisper.cpp via the cmake crate), otherwise MSVC fails with LNK2038 RuntimeLibrary mismatches.
+# This also makes mo-meetings.exe run without the VC++ redistributable.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
+
+[target.aarch64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
