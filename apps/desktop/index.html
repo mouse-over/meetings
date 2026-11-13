@@ -8,6 +8,47 @@
     <script type="module" src="/src/main.ts"></script>
   </head>
   <body>
-    <main id="app"></main>
+    <main id="app">
+      <form id="run-form">
+        <div class="row">
+          <button type="button" id="pick">Open recording…</button>
+          <span id="file" class="muted">No recording selected</span>
+        </div>
+        <div class="options">
+          <label>
+            Language
+            <select id="language">
+              <option value="cs">Czech</option>
+              <option value="en">English</option>
+              <option value="sk">Slovak</option>
+              <option value="de">German</option>
+              <option value="auto">Detect</option>
+            </select>
+          </label>
+          <label>
+            Speakers
+            <input id="speakers" type="number" min="1" max="64" placeholder="auto" />
+          </label>
+          <label class="wide">
+            Glossary
+            <textarea id="prompt" rows="2" placeholder="Names and domain terms, e.g. backend, deploy, Kubernetes"></textarea>
+          </label>
+        </div>
+        <button type="submit" id="run" disabled>Transcribe</button>
+      </form>
+
+      <section id="progress" hidden>
+        <ol id="stages"></ol>
+        <progress id="chunks" max="1" value="0"></progress>
+        <div id="chunk-text" class="muted"></div>
+      </section>
+
+      <p id="error" role="alert" hidden></p>
+
+      <section id="result" hidden>
+        <p id="summary"></p>
+        <ol id="cues"></ol>
+      </section>
+    </main>
   </body>
 </html>
