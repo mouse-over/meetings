@@ -18,6 +18,14 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # rust-cache prunes target/sherpa-onnx-prebuilt (the libs sherpa-onnx-sys downloads) but keeps the build
+      # script's output; after a partial cache restore sherpa-onnx-sys then recompiles against a missing static lib.
+      # Forget the build script run so it downloads the libs again.
+      - name: Drop stale sherpa-onnx build outputs
+        run: |
+          if [ ! -d target/sherpa-onnx-prebuilt ]; then
+            rm -rf target/debug/build/sherpa-onnx-sys-* target/debug/.fingerprint/sherpa-onnx-sys-*
+          fi
       - run: sudo apt-get update && sudo apt-get install -y cmake libclang-dev
       - run: cargo fmt --all --check
       - run: cargo clippy --workspace --all-targets --no-default-features -- -D warnings
