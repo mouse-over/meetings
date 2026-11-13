@@ -1,0 +1,26 @@
+[package]
+name = "mo-meetings-mcp"
+description = "MCP server (stdio) exposing local meeting transcription and diarization as tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "mo-meetings-mcp"
+path = "src/main.rs"
+
+[features]
+default = ["metal"]
+# whisper.cpp on the GPU via Metal (macOS only; build with --no-default-features elsewhere)
+metal = ["mo-meetings-core/metal"]
+
+[dependencies]
+mo-meetings-core.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+rmcp = { workspace = true }
+schemars.workspace = true
+tokio.workspace = true
