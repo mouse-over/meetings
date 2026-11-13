@@ -32,3 +32,13 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 
 [profile.release]
 lto = "thin"
+
+# Shipped code never panics: it returns `Result`/`Option` so a bug fails one run, not the app (which
+# stays open between runs) or the MCP server. Tests may unwrap, expect and panic (clippy.toml).
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+todo = "deny"
+unimplemented = "deny"
+unreachable = "deny"

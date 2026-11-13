@@ -30,3 +30,6 @@ tauri-build = { version = "2.7.4", features = [] }
 [dev-dependencies]
 serde_json.workspace = true
 tauri = { version = "2.12.5", features = ["protocol-asset", "test"] }
+
+[lints]
+workspace = true

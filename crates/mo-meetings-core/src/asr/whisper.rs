@@ -70,10 +70,10 @@ pub(crate) fn words_from_tokens(toks: &[Tok], seg_end: f64) -> Vec<Word> {
         if t.bytes.is_empty() {
             continue;
         }
-        if groups.is_empty() || t.bytes[0] == b' ' {
-            groups.push(Vec::new());
+        match groups.last_mut() {
+            Some(g) if t.bytes[0] != b' ' => g.push(t),
+            _ => groups.push(vec![t]),
         }
-        groups.last_mut().expect("pushed").push(t);
     }
     let starts: Vec<f64> = groups.iter().map(|g| g[0].dtw.unwrap_or(g[0].t0)).collect();
     let mut words = Vec::with_capacity(groups.len());

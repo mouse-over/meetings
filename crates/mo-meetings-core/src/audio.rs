@@ -61,7 +61,6 @@ pub fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
 
     let mut resampler: Option<Resample16k> = None;
     let mut interleaved: Vec<f32> = Vec::new();
-    let mut decoded_any = false;
     loop {
         let packet = match format.next_packet() {
             Ok(Some(p)) => p,
@@ -87,12 +86,12 @@ pub fn decode_symphonia(path: &Path) -> Result<Vec<f32>> {
             None => resampler.insert(Resample16k::new(rate)?),
         };
         r.push(interleaved.chunks_exact(channels).map(|f| f.iter().sum::<f32>() / channels as f32))?;
-        decoded_any = true;
     }
-    if !decoded_any {
+    // The resampler is created with the first decoded packet.
+    let Some(r) = resampler else {
         return Err(Error::Audio("no audio decoded".into()));
-    }
-    resampler.expect("set when decoded").finish()
+    };
+    r.finish()
 }
 
 /// Decode with an external `ffmpeg` binary (raw f32le 16 kHz mono on stdout).
@@ -152,9 +151,9 @@ impl Resample16k {
         let mut offset = 0;
         while self.pending.len() - offset >= r.input_frames_next() {
             let n = r.input_frames_next();
-            let input = InterleavedSlice::new(&self.pending[offset..offset + n], 1, n).expect("sized");
+            let input = InterleavedSlice::new(&self.pending[offset..offset + n], 1, n).map_err(buffer_err)?;
             let frames = self.scratch.len();
-            let mut output = InterleavedSlice::new_mut(&mut self.scratch, 1, frames).expect("sized");
+            let mut output = InterleavedSlice::new_mut(&mut self.scratch, 1, frames).map_err(buffer_err)?;
             let (used, produced) =
                 r.process_into_buffer(&input, &mut output, None).map_err(|e| Error::Audio(format!("resample: {e}")))?;
             self.out.extend_from_slice(&self.scratch[..produced]);
@@ -174,9 +173,9 @@ impl Resample16k {
             let n = r.input_frames_next();
             let valid = tail.len().min(n);
             tail.resize(n, 0.0);
-            let input = InterleavedSlice::new(&tail[..n], 1, n).expect("sized");
+            let input = InterleavedSlice::new(&tail[..n], 1, n).map_err(buffer_err)?;
             let frames = self.scratch.len();
-            let mut output = InterleavedSlice::new_mut(&mut self.scratch, 1, frames).expect("sized");
+            let mut output = InterleavedSlice::new_mut(&mut self.scratch, 1, frames).map_err(buffer_err)?;
             let idx =
                 Indexing { input_offset: 0, output_offset: 0, partial_len: Some(valid), active_channels_mask: None };
             let (_, produced) = r
@@ -192,6 +191,11 @@ impl Resample16k {
         out.truncate(expected);
         Ok(out)
     }
+}
+
+/// The buffers are sized from the resampler, so this only fires on a bug.
+fn buffer_err(e: impl std::fmt::Display) -> Error {
+    Error::Audio(format!("resampler buffer: {e}"))
 }
 
 #[cfg(test)]

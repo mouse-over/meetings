@@ -256,7 +256,7 @@ impl Reporter {
                         let b = ProgressBar::new(total as u64);
                         b.set_style(
                             ProgressStyle::with_template("transcribing [{bar:30}] {pos}/{len} chunks {msg} eta {eta}")
-                                .expect("valid template")
+                                .unwrap_or_else(|_| ProgressStyle::default_bar())
                                 .progress_chars("=> "),
                         );
                         b
@@ -328,7 +328,7 @@ fn models_cmd(cmd: ModelsCommand) -> anyhow::Result<()> {
                 let bar = ProgressBar::new(m.size);
                 bar.set_style(
                     ProgressStyle::with_template("{msg:28} [{bar:30}] {bytes}/{total_bytes} {bytes_per_sec} eta {eta}")
-                        .expect("valid template")
+                        .unwrap_or_else(|_| ProgressStyle::default_bar())
                         .progress_chars("=> "),
                 );
                 bar.set_message(m.id);
