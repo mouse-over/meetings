@@ -99,6 +99,11 @@ npm run tauri dev     # or `cargo tauri dev` with tauri-cli 2 installed
 npm run tauri build -- --no-bundle -- --no-default-features   # Linux, Windows: CPU only
 ```
 
+Releases attach the desktop app too: `mo-meetings-desktop-<version>-aarch64-apple-darwin.dmg` (Metal, with the
+sherpa-onnx and onnxruntime dylibs in `Contents/Frameworks`), `.deb` and `.AppImage` for Linux x86_64 and a
+`-setup.exe` (NSIS) for Windows x86_64. The macOS app is signed ad hoc only, not notarised: after downloading run
+`xattr -dr com.apple.quarantine /Applications/mo-meetings.app` (or right-click → Open).
+
 ## Development
 
 ```sh
