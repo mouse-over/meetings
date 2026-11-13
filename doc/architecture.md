@@ -1,8 +1,8 @@
 # mo-meetings architecture
 
-Local meeting transcription: recording → WebVTT with speakers, no Python, no cloud. Today a library and a CLI
-(milestone M0); later a Tauri desktop app in the style of [Handy](https://github.com/cjpais/Handy) and an MCP
-server on top of the same library.
+Local meeting transcription: recording → WebVTT with speakers, no Python, no cloud. Today a library, a CLI
+(milestone M0) and an MCP server; later a Tauri desktop app in the style of [Handy](https://github.com/cjpais/Handy)
+on top of the same library.
 
 ## Crates
 
@@ -10,7 +10,7 @@ server on top of the same library.
 crates/mo-meetings-core   library: audio, diarization, ASR, chunking, assembly, VTT/JSON, models, pipeline
 crates/mo-meetings-cli    binary `mo-meetings` (clap): transcribe, diarize, models list|download|path
 apps/desktop           (M1, planned) Tauri v2 app using mo-meetings-core directly
-crates/mo-meetings-mcp    (planned) MCP server over stdio (rmcp) exposing transcribe/diarize as tools
+crates/mo-meetings-mcp    binary `mo-meetings-mcp`: MCP server over stdio (rmcp) exposing transcribe/diarize as tools
 ```
 
 The core has no CLI or UI dependencies; progress is reported through a callback (`pipeline::Progress`), which the
@@ -70,7 +70,8 @@ the CLI exit code (`Error::exit_code`: 2 input, 3 model missing, 4 processing).
 | Resampling | `rubato` 5.0.1 (`Fft`) | Synchronous FFT resampler, exact for 48 k/44.1 k → 16 k, streamed so a 1 h recording never sits in memory at the source rate. |
 | CLI | `clap` 4.6, `indicatif` 0.18 | |
 | Downloads | `ureq` 3.5 (rustls), `sha2` 0.11, `dirs` 7 | Small blocking client, no async runtime in the core. |
-| Later | `tauri` 2.12, `rmcp` 3.10 | Desktop shell (M1), MCP server. |
+| MCP | `rmcp` 3.10 (`transport-io`), `tokio` | Official Rust SDK; `#[tool]` macros with JSON Schema from `schemars`, stdio transport, progress notifications. |
+| Later | `tauri` 2.12 | Desktop shell (M1). |
 
 ### Embeddings once
 
@@ -87,14 +88,26 @@ Downloaded by `mo-meetings models download` into the user cache (`dirs::cache_di
 `NOTICE`: whisper large-v3-turbo (default) / large-v3 (MIT), pyannote segmentation-3.0 ONNX (MIT, © CNRS),
 NeMo TitaNet-Large ONNX (CC-BY-4.0, NVIDIA).
 
-## Desktop app and MCP (planned)
+## MCP server
+
+`mo-meetings-mcp` speaks MCP over stdio (stdout is the protocol, logs go to stderr). Tools:
+
+- `transcribe(path, language?, prompt?, num_speakers?, output?)`: runs `pipeline::run` on a blocking thread,
+  writes the VTT and the JSON metadata (default next to the input) and returns their paths with duration, speakers
+  and cue count (also as structured content).
+- `diarize(path, num_speakers?, output?)`: writes the same JSON as `mo-meetings diarize` (default
+  `<input>.turns.json`) and returns its path.
+
+When the request carries a progress token, `pipeline::Progress` is forwarded as `notifications/progress` on a
+0-100 scale (load 0-5, decode 5-10, diarize 10-40, ASR 40-95 by audio seconds, assembly 95-100). Errors come back
+as tool results with `isError`; a missing model names `mo-meetings models download`.
+
+## Desktop app (planned)
 
 - **Tauri v2 app** (`apps/desktop`): Rust side calls `pipeline::run` on a worker thread and forwards `Progress` as
   events; front-end shows stages and chunk progress, plays the recording (HTML `<video>`/`<audio>` from a local
   asset URL) with the VTT as a synced transcript, click-to-seek. Models downloaded on first start with progress.
   sherpa-onnx/onnxruntime dylibs go to `Contents/Frameworks` (the CLI already has that rpath).
-- **MCP server**: a thin crate over the same library, stdio transport, tools `transcribe(path, language, prompt)`
-  and `diarize(path)` returning VTT/JSON paths, long runs reported via progress notifications.
 
 ## Milestones
 

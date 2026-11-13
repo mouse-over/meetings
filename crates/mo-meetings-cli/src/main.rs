@@ -188,24 +188,7 @@ fn diarize(input: &Path, output: Option<PathBuf>, num_speakers: Option<u32>, thr
     let start = std::time::Instant::now();
     eprintln!("diarizing…");
     let (d, duration) = pipeline::run_diarization(input, &cfg)?;
-    let label = |s: usize| format!("SPEAKER_{s:02}");
-    let turns: Vec<_> = d.turns.iter().map(|t| serde_json::json!([t.start, t.end, label(t.speaker)])).collect();
-    let excl: Vec<_> = mo_meetings_core::assembly::exclusive_turns(&d.turns)
-        .iter()
-        .map(|t| serde_json::json!([t.start, t.end, label(t.speaker)]))
-        .collect();
-    let timings: serde_json::Map<String, serde_json::Value> =
-        d.timings.iter().map(|(k, v)| (k.clone(), (*v).into())).collect();
-    let v = serde_json::json!({
-        "audio_duration_s": duration,
-        "num_speakers": d.num_speakers,
-        "num_speakers_estimated": d.estimated,
-        "report": d.report,
-        "timings": timings,
-        "total_s": start.elapsed().as_secs_f64(),
-        "turns": turns,
-        "exclusive": excl,
-    });
+    let v = pipeline::diarization_json(&d, duration, start.elapsed().as_secs_f64());
     let text = serde_json::to_string_pretty(&v)? + "\n";
     match output {
         Some(p) => std::fs::write(p, text)?,

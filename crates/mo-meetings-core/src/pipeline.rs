@@ -249,3 +249,26 @@ pub fn run(input: &Path, cfg: &Config, progress: &mut dyn FnMut(Progress)) -> Re
     }
     Ok(tr)
 }
+
+/// JSON written by `diarize` (CLI and MCP): turns (may overlap) and exclusive turns as `[start, end, label]`
+/// with labels `SPEAKER_NN`, plus the merge report and timings.
+pub fn diarization_json(d: &Diarization, audio_duration_s: f64, total_s: f64) -> serde_json::Value {
+    let label = |s: usize| format!("SPEAKER_{s:02}");
+    let turns: Vec<_> = d.turns.iter().map(|t| serde_json::json!([t.start, t.end, label(t.speaker)])).collect();
+    let excl: Vec<_> = assembly::exclusive_turns(&d.turns)
+        .iter()
+        .map(|t| serde_json::json!([t.start, t.end, label(t.speaker)]))
+        .collect();
+    let timings: serde_json::Map<String, serde_json::Value> =
+        d.timings.iter().map(|(k, v)| (k.clone(), (*v).into())).collect();
+    serde_json::json!({
+        "audio_duration_s": audio_duration_s,
+        "num_speakers": d.num_speakers,
+        "num_speakers_estimated": d.estimated,
+        "report": d.report,
+        "timings": timings,
+        "total_s": total_s,
+        "turns": turns,
+        "exclusive": excl,
+    })
+}
