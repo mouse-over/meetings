@@ -101,7 +101,7 @@ impl MeetingsServer {
         if output == input || json_path == input {
             return Err(message(Error::InvalidInput("output would overwrite the input".into())));
         }
-        if json_path == output {
+        if output.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
             return Err(message(Error::InvalidInput("output must not have a .json extension".into())));
         }
         let mut cfg = Config::default();
