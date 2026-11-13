@@ -99,12 +99,13 @@ jobs:
           MO_MEETINGS_MODELS_DIR="$RUNNER_TEMP/models" "$bin" models list
           if [[ "$RUNNER_OS" == macOS ]]; then
             libs=$(DYLD_PRINT_LIBRARIES=1 "$bin" --version 2>&1)
-            echo "$libs" | grep -E 'onnx|sherpa'
-            echo "$libs" | grep -q "/mo-meetings-[^/]*/onnxruntime/libonnxruntime.dylib" \
+            grep -E 'onnx|sherpa' <<<"$libs"
+            grep -q "/mo-meetings-[^/]*/onnxruntime/libonnxruntime.dylib" <<<"$libs" \
               || { echo "::error::Microsoft onnxruntime from the archive was not loaded"; exit 1; }
           else
-            ldd "$bin"
-            if ldd "$bin" | grep -q 'not found'; then echo "::error::missing shared libraries"; exit 1; fi
+            deps=$(ldd "$bin")
+            echo "$deps"
+            if grep -q 'not found' <<<"$deps"; then echo "::error::missing shared libraries"; exit 1; fi
           fi
 
   release:
