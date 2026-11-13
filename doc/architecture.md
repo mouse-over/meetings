@@ -114,10 +114,14 @@ workspace). Planned:
 
 ## Milestones
 
+Recommended order of the open issues: [`roadmap.md`](roadmap.md).
+
 - **M0 (this)**: workspace, library, CLI through the whole pipeline, unit tests, CI (fmt, clippy, tests), quality
   check against Teams VTT.
 - **M1 Tauri shell**: open a recording, run the pipeline with progress, play it with the synced transcript, export
   VTT/JSON; first-run model download.
+- **M1.5 projects**: per-meeting SQLite project file, settings profiles, extra passes and comparison, segment
+  re-transcription, Markdown export for agents.
 - **M2 speakers**: rename speakers (name ↔ `Speaker N`), merge/split speakers, reassign a cue; re-run assembly
   only. Optional voice profiles (TitaNet embeddings) to suggest names across meetings.
 - **M3 scenes**: scene detection on the video (screen-share changes), key frames next to the transcript, export
