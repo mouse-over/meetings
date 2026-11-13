@@ -1,0 +1,25 @@
+[package]
+name = "mo-meetings-desktop"
+description = "Desktop app (Tauri) for local meeting transcription"
+version.workspace = true
+edition.workspace = true
+# Tauri 2.12 needs a newer Rust than the rest of the workspace.
+rust-version = "1.90"
+publish.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "mo-meetings-desktop"
+path = "src/main.rs"
+
+[features]
+default = ["metal"]
+# whisper.cpp on the GPU via Metal (macOS only; build with --no-default-features elsewhere)
+metal = ["mo-meetings-core/metal"]
+
+[dependencies]
+mo-meetings-core.workspace = true
+tauri = { version = "2.12.5", features = [] }
+
+[build-dependencies]
+tauri-build = { version = "2.7.4", features = [] }

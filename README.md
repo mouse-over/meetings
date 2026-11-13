@@ -86,6 +86,19 @@ Other clients (Claude Desktop `claude_desktop_config.json`, Cursor, VS Code, …
 A transcription can take minutes; if the client times out tool calls, raise its limit (Claude Code:
 `MCP_TOOL_TIMEOUT=1800000` in milliseconds).
 
+## Desktop app
+
+`apps/desktop` is a Tauri v2 app (M1, so far an empty window). It needs Rust 1.90+, Node.js 22 and, on Linux, the
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libxdo-dev`,
+`librsvg2-dev`).
+
+```sh
+cd apps/desktop
+npm ci
+npm run tauri dev     # or `cargo tauri dev` with tauri-cli 2 installed
+npm run tauri build -- --no-bundle -- --no-default-features   # Linux, Windows: CPU only
+```
+
 ## Development
 
 ```sh
