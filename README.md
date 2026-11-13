@@ -63,8 +63,11 @@ MO_MEETINGS_TEST_AUDIO=/path/to/meeting.mp4 cargo test --release -p mo-meetings-
 python3 -I scripts/eval.py LABEL dump.json teams.vtt   # score `transcribe --dump` against a Teams VTT
 ```
 
-Release: bump `version` in the root `Cargo.toml`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`;
-`.github/workflows/release.yml` builds, smoke-tests and publishes the archives.
+Release: commits on `main` follow [Conventional Commits](https://www.conventionalcommits.org) (`feat:` → minor,
+`fix:` → patch, `!` → major). [release-plz](https://release-plz.dev) keeps a release PR open with the version bump
+and `CHANGELOG.md` ([`release-plz.toml`](release-plz.toml)); merging it pushes tag `vX.Y.Z`, and
+`.github/workflows/release.yml` builds, smoke-tests and publishes the archives. Manual fallback: bump `version` in
+the root `Cargo.toml`, merge, then `git tag vX.Y.Z && git push origin vX.Y.Z`.
 
 - `spikes/sherpa-diarization/`: does sherpa-onnx (ONNX) diarization match pyannote community-1? Results in
   [`RESULTS.md`](spikes/sherpa-diarization/RESULTS.md).

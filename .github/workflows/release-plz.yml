@@ -1,0 +1,47 @@
+name: release-plz
+
+# On every push to main: open or update the release PR (version bump + CHANGELOG.md from conventional commits).
+# When the merged commit is that release PR, push tag vX.Y.Z, which runs release.yml. See release-plz.toml.
+#
+# Needs secret RELEASE_PLZ_TOKEN (fine-grained PAT or GitHub App token, Contents + Pull requests read & write on
+# this repo): with the default GITHUB_TOKEN the tag would not trigger release.yml and the PR would not run ci.yml.
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  release:
+    if: github.repository_owner == 'mouse-over'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5.148
+        with:
+          command: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
+
+  release-pr:
+    if: github.repository_owner == 'mouse-over'
+    runs-on: ubuntu-latest
+    concurrency:
+      group: release-plz-${{ github.ref }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.RELEASE_PLZ_TOKEN }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: release-plz/action@v0.5.148
+        with:
+          command: release-pr
+        env:
+          GITHUB_TOKEN: ${{ secrets.RELEASE_PLZ_TOKEN }}
