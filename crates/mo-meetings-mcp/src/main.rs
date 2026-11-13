@@ -97,8 +97,12 @@ impl MeetingsServer {
             Some(o) => absolute(o)?,
             None => input.with_extension("vtt"),
         };
-        if output == input {
+        let json_path = output.with_extension("json");
+        if output == input || json_path == input {
             return Err(message(Error::InvalidInput("output would overwrite the input".into())));
+        }
+        if json_path == output {
+            return Err(message(Error::InvalidInput("output must not have a .json extension".into())));
         }
         let mut cfg = Config::default();
         cfg.asr.language = parse_language(p.language.as_deref())?;
@@ -114,7 +118,6 @@ impl MeetingsServer {
                 }
             })?;
             std::fs::write(&output, vtt::render(&tr.cues))?;
-            let json_path = output.with_extension("json");
             let meta = serde_json::to_string_pretty(&tr.meta).map_err(|e| Error::InvalidInput(e.to_string()))?;
             std::fs::write(&json_path, meta + "\n")?;
             Ok::<_, Error>(TranscribeResult {
