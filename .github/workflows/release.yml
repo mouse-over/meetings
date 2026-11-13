@@ -1,7 +1,7 @@
 name: release
 
-# Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml) to build the CLI and the MCP server, smoke-test
-# the archives on fresh runners and publish a GitHub release. Pull requests that touch this file run build + smoke
+# Push a tag `vX.Y.Z` (matching the workspace version in Cargo.toml) to build the CLI, the MCP server and the desktop
+# app (apps/desktop: .dmg, .deb + .AppImage, NSIS setup), smoke-test them on fresh runners and publish a GitHub release. Pull requests that touch this file run build + smoke
 # test only.
 on:
   push:
@@ -26,21 +26,32 @@ jobs:
           - target: aarch64-apple-darwin
             os: macos-15
             cargo_flags: ""
+            bundles: dmg
           # CPU only; sherpa-onnx linked statically. Oldest supported Ubuntu for a lower glibc requirement.
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-22.04
             cargo_flags: --no-default-features
+            bundles: deb,appimage
           # CPU only; sherpa-onnx static (/MT) and the C runtime linked statically too (.cargo/config.toml).
           - target: x86_64-pc-windows-msvc
             os: windows-2025
             cargo_flags: --no-default-features
+            bundles: nsis
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@stable
       - name: Install build dependencies
         if: runner.os == 'Linux'
-        run: sudo apt-get update && sudo apt-get install -y cmake libclang-dev
+        # cmake/libclang: whisper.cpp; webkit2gtk, xdo, rsvg: Tauri; patchelf, file: AppImage bundling
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake libclang-dev libwebkit2gtk-4.1-dev libxdo-dev librsvg2-dev patchelf file
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/desktop/package-lock.json
       - name: Check tag matches the workspace version
         id: version
         shell: bash
@@ -83,6 +94,41 @@ jobs:
           path: |
             dist/${{ env.ARCHIVE }}
             dist/${{ env.ARCHIVE }}.sha256
+          if-no-files-found: error
+      # Desktop app. On macOS tauri.conf.json copies the sherpa-onnx and Microsoft onnxruntime dylibs from
+      # target/release into Contents/Frameworks (the binary's rpath) and signs the bundle ad hoc.
+      - name: Build desktop app
+        working-directory: apps/desktop
+        shell: bash
+        run: |
+          npm ci
+          npx tauri build --ci --bundles ${{ matrix.bundles }} -- --locked ${{ matrix.cargo_flags }}
+      - name: Package desktop app
+        shell: bash
+        run: |
+          name="mo-meetings-desktop-${{ steps.version.outputs.version }}-${{ matrix.target }}"
+          mkdir -p dist-desktop
+          shopt -s nullglob
+          count=0
+          for f in target/release/bundle/{dmg/*.dmg,deb/*.deb,appimage/*.AppImage,nsis/*.exe}; do
+            case "$f" in
+              *.dmg) out="$name.dmg" ;;
+              *.deb) out="$name.deb" ;;
+              *.AppImage) out="$name.AppImage" ;;
+              *.exe) out="$name-setup.exe" ;;
+            esac
+            cp "$f" "dist-desktop/$out"
+            (cd dist-desktop && { sha256sum "$out" 2>/dev/null || shasum -a 256 "$out"; } > "$out.sha256")
+            count=$((count + 1))
+          done
+          ls -l dist-desktop
+          expected=$(tr ',' '\n' <<<"${{ matrix.bundles }}" | wc -l)
+          [[ $count -eq $expected ]] \
+            || { echo "::error::expected $expected desktop bundles (${{ matrix.bundles }})"; exit 1; }
+      - uses: actions/upload-artifact@v7
+        with:
+          name: desktop-${{ matrix.target }}
+          path: dist-desktop/*
           if-no-files-found: error
 
   smoke:
@@ -149,8 +195,40 @@ jobs:
             if grep -q 'not found' <<<"$deps"; then echo "::error::missing shared libraries"; exit 1; fi
           fi
 
+  smoke-desktop:
+    # Fresh macOS runner: the .dmg must run on its own, loading the dylibs from Contents/Frameworks.
+    needs: build
+    runs-on: macos-26
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: desktop-aarch64-apple-darwin
+      - name: Verify, mount and launch
+        run: |
+          shasum -a 256 -c ./*.dmg.sha256
+          hdiutil attach -nobrowse -readonly -mountpoint "$RUNNER_TEMP/dmg" ./*.dmg
+          app=$(echo "$RUNNER_TEMP"/dmg/*.app)
+          ls -l "$app/Contents/Frameworks"
+          test -f "$app/Contents/Frameworks/libsherpa-onnx-c-api.dylib"
+          test -f "$app/Contents/Frameworks/libonnxruntime.dylib"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          exe=$(echo "$app"/Contents/MacOS/*)
+          DYLD_PRINT_LIBRARIES=1 "$exe" > "$RUNNER_TEMP/app.log" 2>&1 &
+          pid=$!
+          sleep 10
+          if ! kill -0 "$pid"; then
+            cat "$RUNNER_TEMP/app.log"
+            echo "::error::desktop app exited during startup"; exit 1
+          fi
+          kill "$pid"
+          grep -E 'onnx|sherpa' "$RUNNER_TEMP/app.log"
+          grep -q "\.app/Contents/Frameworks/libonnxruntime.dylib" "$RUNNER_TEMP/app.log" \
+            || { echo "::error::the app did not load onnxruntime from Contents/Frameworks"; exit 1; }
+          grep -q "\.app/Contents/Frameworks/libsherpa-onnx-c-api.dylib" "$RUNNER_TEMP/app.log" \
+            || { echo "::error::the app did not load sherpa-onnx from Contents/Frameworks"; exit 1; }
+
   release:
-    needs: smoke
+    needs: [smoke, smoke-desktop]
     if: github.ref_type == 'tag'
     runs-on: ubuntu-latest
     permissions:

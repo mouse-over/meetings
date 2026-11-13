@@ -35,7 +35,13 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "14.0"
+      "minimumSystemVersion": "14.0",
+      "signingIdentity": "-",
+      "hardenedRuntime": false,
+      "frameworks": [
+        "../../../target/release/libsherpa-onnx-c-api.dylib",
+        "../../../target/release/onnxruntime/libonnxruntime.dylib"
+      ]
     }
   }
 }
