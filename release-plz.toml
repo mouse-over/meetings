@@ -17,7 +17,7 @@ name = "mo-meetings-cli"
 git_tag_name = "v{{ version }}"
 changelog_path = "CHANGELOG.md"
 # Most changes land in the library; list them in the CLI changelog and let them trigger a release.
-changelog_include = ["mo-meetings-core", "mo-meetings-mcp"]
+changelog_include = ["mo-meetings-core", "mo-meetings-mcp", "mo-meetings-desktop"]
 version_group = "workspace"
 
 [[package]]
@@ -29,6 +29,13 @@ version_group = "workspace"
 
 [[package]]
 name = "mo-meetings-mcp"
+git_tag_name = "v{{ version }}"
+git_tag_enable = false
+changelog_update = false
+version_group = "workspace"
+
+[[package]]
+name = "mo-meetings-desktop"
 git_tag_name = "v{{ version }}"
 git_tag_enable = false
 changelog_update = false
