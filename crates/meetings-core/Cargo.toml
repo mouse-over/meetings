@@ -19,7 +19,17 @@ serde_json.workspace = true
 symphonia.workspace = true
 rubato.workspace = true
 whisper-rs.workspace = true
-sherpa-onnx.workspace = true
 dirs.workspace = true
 sha2.workspace = true
 ureq.workspace = true
+
+# macOS: sherpa-onnx as shared libraries so that build.rs can put Microsoft's onnxruntime in front of the one
+# bundled in the sherpa-onnx release (same version, but that build is ~2.3x slower on Apple Silicon).
+[target.'cfg(target_os = "macos")'.dependencies]
+sherpa-onnx = { workspace = true, features = ["shared"] }
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+sherpa-onnx = { workspace = true, features = ["static"] }
+
+[build-dependencies]
+sha2.workspace = true
