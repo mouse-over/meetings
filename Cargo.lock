@@ -2342,7 +2342,7 @@ dependencies = [
 
 [[package]]
 name = "mo-meetings-cli"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "clap",
@@ -2354,7 +2354,7 @@ dependencies = [
 
 [[package]]
 name = "mo-meetings-core"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "dirs",
  "rubato",
@@ -2370,7 +2370,7 @@ dependencies = [
 
 [[package]]
 name = "mo-meetings-desktop"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "mo-meetings-core",
  "serde",
@@ -2382,7 +2382,7 @@ dependencies = [
 
 [[package]]
 name = "mo-meetings-mcp"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "mo-meetings-core",
