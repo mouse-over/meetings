@@ -29,10 +29,11 @@ pub fn exclusive_turns(turns: &[Turn]) -> Vec<Turn> {
             && t.start < last.end
         {
             if t.end <= last.end {
-                let prev = out.pop().expect("non-empty");
-                out.push(Turn::new(prev.start, t.start, prev.speaker));
-                out.push(Turn::new(t.start, t.end, t.speaker));
-                out.push(Turn::new(t.end, prev.end, prev.speaker));
+                let (end, speaker) = (last.end, last.speaker);
+                last.end = t.start;
+                let rest = Turn::new(t.end, end, speaker);
+                out.push(t);
+                out.push(rest);
                 continue;
             }
             last.end = t.start;

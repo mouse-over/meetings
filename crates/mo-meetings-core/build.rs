@@ -21,7 +21,11 @@ fn main() {
     if os != "macos" {
         return;
     }
-    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    // Cargo always sets OUT_DIR for build scripts.
+    let Some(out_dir) = env::var_os("OUT_DIR").map(PathBuf::from) else {
+        println!("cargo:warning=OUT_DIR is not set; skipping the onnxruntime rpaths and download");
+        return;
+    };
     let profile_dir = profile_dir(&out_dir);
     // Unit and integration test binaries are not next to the shared libraries: give them absolute rpaths.
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", profile_dir.join("onnxruntime").display());

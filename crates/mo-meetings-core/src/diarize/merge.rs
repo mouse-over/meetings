@@ -108,8 +108,9 @@ pub fn merge_clusters(turns: &[Turn], emb: &[Option<Vec<f32>>], p: &MergeParams)
             if big.contains(&t.speaker) {
                 continue;
             }
+            // Both searches run over non-empty sets (`centroids`, the turns of `big`); keep the speaker otherwise.
             out[i].speaker = match &emb[i] {
-                Some(e) => centroids.iter().max_by(|a, b| dot(e, &a.1).total_cmp(&dot(e, &b.1))).expect("non-empty").0,
+                Some(e) => centroids.iter().max_by(|a, b| dot(e, &a.1).total_cmp(&dot(e, &b.1))).map(|c| c.0),
                 None => {
                     let mid = (t.start + t.end) / 2.0;
                     turns
@@ -119,10 +120,10 @@ pub fn merge_clusters(turns: &[Turn], emb: &[Option<Vec<f32>>], p: &MergeParams)
                             let d = |o: &Turn| (o.start - mid).abs().min((o.end - mid).abs());
                             d(a).total_cmp(&d(b))
                         })
-                        .expect("big clusters have turns")
-                        .speaker
+                        .map(|o| o.speaker)
                 }
-            };
+            }
+            .unwrap_or(t.speaker);
         }
     }
     report.clusters_after_small = distinct_speakers(&out).len();
