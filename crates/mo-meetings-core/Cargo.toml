@@ -33,3 +33,6 @@ sherpa-onnx = { workspace = true, features = ["static"] }
 
 [build-dependencies]
 sha2.workspace = true
+
+[lints]
+workspace = true
