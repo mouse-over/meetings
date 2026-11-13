@@ -2,7 +2,7 @@ name: release-pr
 
 # Releases are started by hand: Actions -> release-pr -> Run workflow.
 #   1. `pr` (workflow_dispatch): next version from conventional commits since the last vX.Y.Z tag (git-cliff,
-#      cliff.toml) or the chosen bump; bumps [workspace.package] version, regenerates CHANGELOG.md and opens the
+#      cliff.toml) or the chosen bump (also when only ci/chore commits landed); bumps [workspace.package] version, regenerates CHANGELOG.md and opens the
 #      release PR `chore: release vX.Y.Z`.
 #   2. `tag` (push to main): when the workspace version has no tag yet, i.e. the release PR was merged, pushes tag
 #      vX.Y.Z, which runs release.yml (build, smoke test, GitHub release).
@@ -50,8 +50,20 @@ jobs:
               | jq -r '.packages[] | select(.name == "mo-meetings-cli") | .version'
           }
           current=$(workspace_version)
-          if [[ "$BUMP" == auto ]]; then next=$(git cliff --bumped-version); else next=$(git cliff --bumped-version --bump "$BUMP"); fi
-          next=${next#v}
+          if [[ "$BUMP" == auto ]]; then
+            next=$(git cliff --bumped-version)
+            next=${next#v}
+          else
+            # Computed here: git-cliff refuses any bump when every commit since the tag is skipped by cliff.toml
+            # (ci, chore, ...), but an explicit bump must still release, e.g. a release workflow change.
+            IFS=. read -r major minor patch <<<"$current"
+            case "$BUMP" in
+              patch) patch=$((patch + 1)) ;;
+              minor) minor=$((minor + 1)); patch=0 ;;
+              major) major=$((major + 1)); minor=0; patch=0 ;;
+            esac
+            next="$major.$minor.$patch"
+          fi
           if [[ "$next" == "$current" ]] || git rev-parse -q --verify "refs/tags/v$next" > /dev/null; then
             echo "::error::nothing to release: no feat/fix/... commits since the last tag (v$current); pick a bump explicitly"
             exit 1
