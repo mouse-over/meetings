@@ -134,6 +134,25 @@ ve stejném releasu: Rev Reverb má podle všeho nekomerční licenci (neověřo
 - Omezení měření: jedna schůzka, 5 mluvčích, čeština a slovenština. Práh 1.05 a hranice 20 s jsou z ní vyladěné; před
   rozhodnutím o produktu stojí za to ověřit je na 2–3 dalších nahrávkách (jiný počet mluvčích, jiná délka).
 
+## Ověření na dalších nahrávkách
+
+Pozdější ověření na 4 dalších nahrávkách (jiný počet mluvčích a délka) změnilo doporučení výše:
+
+- segmentace `pyannote-segmentation-3.0` (ONNX fp32) + embedding NeMo **TitaNet-Large**, `FastClustering`
+  práh **1.05**, `min_duration_on=0.3`, `min_duration_off=0.5`;
+- pak **sloučení shluků s méně než 1 % celkové délky řeči** do nejbližšího velkého (kosinová podobnost embeddingů)
+  místo pevné hranice 20 s;
+- pak **slučování shluků, jejichž centroidy mají kosinovou podobnost > 0,7**, opakovaně, dokud nějaké jsou.
+  Části téhož mluvčího mají 0,78–0,97, různí mluvčí nejvýš 0,53.
+
+| | Shoda mluvčích s Teams |
+|---|---|
+| sherpa-onnx, nastavení výše (4 nahrávky + krátký výřez) | **94–98 %** |
+| pyannote community-1 (stejné nahrávky) | 90–96 % |
+
+- Vynucený počet mluvčích nefunguje dobře (sloučí nejmenšího mluvčího), proto jen jako volitelná nápověda.
+- CPU se 4 vlákny, ne CoreML EP (2× pomalejší). Int8 segmentace je horší, nepoužívat.
+
 ## Soubory
 
 - `scripts/diar.py`: diarizace sherpa-onnx → JSON ve formátu spiku (+ `max_rss_mb`, parametry).

@@ -1,0 +1,27 @@
+mo-meetings (mouse-over meetings)
+Copyright (c) 2026 Vaclav Prokes.
+
+This software downloads and uses the following third-party models at runtime. They are not part of this
+repository; `mo-meetings models download` fetches them from the URLs below into the user cache and verifies their
+SHA-256.
+
+- OpenAI Whisper large-v3-turbo and large-v3, ggml conversions by the whisper.cpp project
+  https://huggingface.co/ggerganov/whisper.cpp
+  License: MIT, Copyright (c) 2022 OpenAI
+
+- pyannote/segmentation-3.0, ONNX export by the sherpa-onnx project
+  https://huggingface.co/csukuangfj/sherpa-onnx-pyannote-segmentation-3-0 (original: pyannote/segmentation-3.0)
+  License: MIT, Copyright (c) 2023 CNRS
+
+- NVIDIA NeMo TitaNet-Large speaker embedding model, ONNX export by the sherpa-onnx project
+  https://github.com/k2-fsa/sherpa-onnx/releases/tag/speaker-recongition-models
+  (original: https://huggingface.co/nvidia/speakerverification_en_titanet_large)
+  License: Creative Commons Attribution 4.0 International (CC-BY-4.0), Copyright (c) NVIDIA Corporation.
+  The model is used unmodified (converted to ONNX).
+
+Linked libraries (see Cargo.lock for the full dependency list):
+
+- whisper.cpp / ggml (via whisper-rs), MIT
+- sherpa-onnx, Apache-2.0
+- ONNX Runtime, MIT, Copyright (c) Microsoft Corporation
+- Symphonia, MPL-2.0
