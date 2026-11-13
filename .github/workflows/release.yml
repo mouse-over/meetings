@@ -129,7 +129,8 @@ jobs:
           grep -q '"name":"transcribe"' <<<"$tools" && grep -q '"name":"diarize"' <<<"$tools" \
             || { echo "::error::MCP server did not list its tools"; exit 1; }
           if [[ "$RUNNER_OS" == macOS ]]; then
-            DYLD_PRINT_LIBRARIES=1 "$mcp" --version 2>&1 | grep -q "/mo-meetings-[^/]*/onnxruntime/libonnxruntime.dylib" \
+            mcp_libs=$(DYLD_PRINT_LIBRARIES=1 "$mcp" --version 2>&1)
+            grep -q "/mo-meetings-[^/]*/onnxruntime/libonnxruntime.dylib" <<<"$mcp_libs" \
               || { echo "::error::mo-meetings-mcp did not load the archive's onnxruntime"; exit 1; }
             libs=$(DYLD_PRINT_LIBRARIES=1 "$bin" --version 2>&1)
             grep -E 'onnx|sherpa' <<<"$libs"
