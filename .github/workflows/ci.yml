@@ -25,7 +25,7 @@ jobs:
         run: |
           if ! find target/sherpa-onnx-prebuilt -name libsherpa-onnx-c-api.a 2>/dev/null | grep -q .; then
             ls -R target/sherpa-onnx-prebuilt 2>/dev/null | head -20 || true
-            rm -rf target/debug/build/sherpa-onnx-sys-* target/debug/.fingerprint/sherpa-onnx-sys-*
+            rm -rf target/debug/build/sherpa-onnx-sys* target/debug/.fingerprint/sherpa-onnx-sys*
           fi
       - run: sudo apt-get update && sudo apt-get install -y cmake libclang-dev
       - run: cargo fmt --all --check
