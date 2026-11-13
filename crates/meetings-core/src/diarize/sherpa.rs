@@ -95,6 +95,7 @@ impl SherpaDiarizer {
 
 impl Diarizer for SherpaDiarizer {
     fn diarize(&mut self, audio: &[f32], opts: &DiarizeOptions) -> Result<Diarization> {
+        let t = std::time::Instant::now();
         let result =
             self.diarizer.process(audio).ok_or_else(|| Error::Diarization("sherpa-onnx returned no result".into()))?;
         let turns: Vec<Turn> = result
@@ -102,11 +103,20 @@ impl Diarizer for SherpaDiarizer {
             .into_iter()
             .map(|s| Turn::new(s.start as f64, s.end as f64, s.speaker.max(0) as usize))
             .collect();
+        let sherpa_s = t.elapsed().as_secs_f64();
+        let t = std::time::Instant::now();
         let spans: Vec<(f64, f64)> = turns.iter().map(|t| (t.start, t.end)).collect();
         let emb = self.embedder.embed_spans(audio, &spans)?;
+        let embed_s = t.elapsed().as_secs_f64();
         let merge = MergeParams { max_speakers: opts.num_speakers, ..self.params.merge.clone() };
         let (turns, report) = merge_clusters(&turns, &emb, &merge);
-        Ok(Diarization { num_speakers: report.clusters_final, estimated: opts.num_speakers.is_none(), turns, report })
+        Ok(Diarization {
+            num_speakers: report.clusters_final,
+            estimated: opts.num_speakers.is_none(),
+            turns,
+            report,
+            timings: vec![("sherpa_s".into(), sherpa_s), ("embed_s".into(), embed_s)],
+        })
     }
 }
 

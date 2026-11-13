@@ -21,6 +21,20 @@ struct Cli {
 enum Command {
     /// Transcribe a recording (mp4, m4a, wav, …) into WebVTT with speakers
     Transcribe(TranscribeArgs),
+    /// Diarize only: write speaker turns as JSON
+    Diarize {
+        /// Input recording
+        input: PathBuf,
+        /// Output JSON (default: stdout)
+        #[arg(short, long)]
+        output: Option<PathBuf>,
+        /// Hint: at most this many speakers
+        #[arg(long, value_parser = clap::value_parser!(u32).range(1..=64))]
+        num_speakers: Option<u32>,
+        /// CPU threads
+        #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..=64))]
+        threads: u32,
+    },
     /// Manage models in the user cache
     Models {
         #[command(subcommand)]
@@ -101,6 +115,7 @@ fn main() -> ExitCode {
     let cli = Cli::parse(); // exits with 2 on bad options
     let result = match cli.command {
         Command::Transcribe(args) => transcribe(args),
+        Command::Diarize { input, output, num_speakers, threads } => diarize(&input, output, num_speakers, threads),
         Command::Models { command } => models_cmd(command),
     };
     match result {
@@ -160,6 +175,39 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
     if let Some(path) = &args.dump {
         write_dump(path, &tr)?;
     }
+    Ok(())
+}
+
+fn diarize(input: &Path, output: Option<PathBuf>, num_speakers: Option<u32>, threads: u32) -> anyhow::Result<()> {
+    let cfg =
+        Config { threads: threads as usize, num_speakers: num_speakers.map(|n| n as usize), ..Default::default() };
+    let start = std::time::Instant::now();
+    eprintln!("diarizing…");
+    let (d, duration) = pipeline::run_diarization(input, &cfg)?;
+    let label = |s: usize| format!("SPEAKER_{s:02}");
+    let turns: Vec<_> = d.turns.iter().map(|t| serde_json::json!([t.start, t.end, label(t.speaker)])).collect();
+    let excl: Vec<_> = meetings_core::assembly::exclusive_turns(&d.turns)
+        .iter()
+        .map(|t| serde_json::json!([t.start, t.end, label(t.speaker)]))
+        .collect();
+    let timings: serde_json::Map<String, serde_json::Value> =
+        d.timings.iter().map(|(k, v)| (k.clone(), (*v).into())).collect();
+    let v = serde_json::json!({
+        "audio_duration_s": duration,
+        "num_speakers": d.num_speakers,
+        "num_speakers_estimated": d.estimated,
+        "report": d.report,
+        "timings": timings,
+        "total_s": start.elapsed().as_secs_f64(),
+        "turns": turns,
+        "exclusive": excl,
+    });
+    let text = serde_json::to_string_pretty(&v)? + "\n";
+    match output {
+        Some(p) => std::fs::write(p, text)?,
+        None => print!("{text}"),
+    }
+    eprintln!("{} speakers in {:.1} s", d.num_speakers, start.elapsed().as_secs_f64());
     Ok(())
 }
 

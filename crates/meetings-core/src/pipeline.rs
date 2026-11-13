@@ -158,13 +158,40 @@ pub fn transcribe_audio(
         num_speakers: speakers_in_output,
         num_speakers_estimated: diarization.estimated,
         num_speakers_hint: cfg.num_speakers,
-        diarization: serde_json::to_value(&diarization.report).unwrap_or_default(),
+        diarization: {
+            let mut v = serde_json::to_value(&diarization.report).unwrap_or_default();
+            if let serde_json::Value::Object(m) = &mut v {
+                for (k, t) in &diarization.timings {
+                    m.insert(k.clone(), (*t).into());
+                }
+            }
+            v
+        },
         chunks: chunks.len(),
         words: words.len(),
         cues: cues.len(),
         timings,
     };
     Ok(Transcript { cues, words, turns, chunks, diarization, meta })
+}
+
+fn sherpa_diarizer(cfg: &Config) -> Result<(SherpaDiarizer, SherpaParams)> {
+    let seg_path = models::require("pyannote-segmentation-3.0")?;
+    let emb_path = models::require("titanet-large")?;
+    let mut sp = SherpaParams::new(seg_path, emb_path);
+    sp.threads = cfg.threads;
+    Ok((SherpaDiarizer::new(sp.clone())?, sp))
+}
+
+/// Diarization only (bundled sherpa-onnx backend): returns the diarization and the audio duration in seconds.
+pub fn run_diarization(input: &Path, cfg: &Config) -> Result<(Diarization, f64)> {
+    if !input.is_file() {
+        return Err(crate::Error::InvalidInput(format!("input file not found: {}", input.display())));
+    }
+    let (mut diarizer, _) = sherpa_diarizer(cfg)?;
+    let (audio, _) = audio::load(input)?;
+    let d = diarizer.diarize(&audio, &DiarizeOptions { num_speakers: cfg.num_speakers })?;
+    Ok((d, audio.len() as f64 / SAMPLE_RATE as f64))
 }
 
 /// Full pipeline with the bundled backends (sherpa-onnx diarization, whisper.cpp ASR) and models from the
@@ -175,14 +202,12 @@ pub fn run(input: &Path, cfg: &Config, progress: &mut dyn FnMut(Progress)) -> Re
         return Err(crate::Error::InvalidInput(format!("input file not found: {}", input.display())));
     }
     let asr_path = models::require(&cfg.asr_model)?;
-    let seg_path = models::require("pyannote-segmentation-3.0")?;
-    let emb_path = models::require("titanet-large")?;
+    models::require("pyannote-segmentation-3.0")?;
+    models::require("titanet-large")?;
 
     progress(Progress::Started(Stage::Load));
     let t = Instant::now();
-    let mut sp = SherpaParams::new(seg_path, emb_path);
-    sp.threads = cfg.threads;
-    let mut diarizer = SherpaDiarizer::new(sp.clone())?;
+    let (mut diarizer, sp) = sherpa_diarizer(cfg)?;
     let dtw = match cfg.asr_model.as_str() {
         "whisper-large-v3" => Some(whisper_rs::DtwModelPreset::LargeV3),
         "whisper-large-v3-turbo" => Some(whisper_rs::DtwModelPreset::LargeV3Turbo),

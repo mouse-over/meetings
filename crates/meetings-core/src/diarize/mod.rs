@@ -24,6 +24,8 @@ pub struct Diarization {
     /// `false` when `num_speakers` was capped by a hint.
     pub estimated: bool,
     pub report: merge::MergeReport,
+    /// Backend-specific timings in seconds (e.g. clustering vs. embedding).
+    pub timings: Vec<(String, f64)>,
 }
 
 /// A diarization backend. Implementations get 16 kHz mono audio.
