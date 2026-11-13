@@ -238,7 +238,7 @@ mod tests {
 
     #[test]
     fn wav_roundtrip_via_symphonia() {
-        let dir = std::env::temp_dir().join(format!("meetings-audio-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mo-meetings-audio-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("tone.wav");
         let samples = sine(48_000, 440.0, 1.0);

@@ -879,34 +879,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "meetings-cli"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "indicatif",
- "meetings-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "meetings-core"
-version = "0.1.0"
-dependencies = [
- "dirs",
- "rubato",
- "serde",
- "serde_json",
- "sha2",
- "sherpa-onnx",
- "symphonia",
- "thiserror",
- "ureq 3.5.2",
- "whisper-rs",
-]
-
-[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -926,6 +898,34 @@ checksum = "b63fbc4a50860e98e7b2aa7804ded1db5cbc3aff9193adaff57a6931bf7c4b4c"
 dependencies = [
  "adler2",
  "simd-adler32",
+]
+
+[[package]]
+name = "mo-meetings-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "indicatif",
+ "mo-meetings-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "mo-meetings-core"
+version = "0.1.0"
+dependencies = [
+ "dirs",
+ "rubato",
+ "serde",
+ "serde_json",
+ "sha2",
+ "sherpa-onnx",
+ "symphonia",
+ "thiserror",
+ "ureq 3.5.2",
+ "whisper-rs",
 ]
 
 [[package]]

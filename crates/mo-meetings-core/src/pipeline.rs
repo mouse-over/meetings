@@ -148,7 +148,7 @@ pub fn transcribe_audio(
 
     let speakers_in_output = assembly::speaker_numbers(&words).len();
     let meta = Metadata {
-        tool: format!("meetings {}", env!("CARGO_PKG_VERSION")),
+        tool: format!("mo-meetings {}", env!("CARGO_PKG_VERSION")),
         input: String::new(),
         audio_duration_s: audio.len() as f64 / SAMPLE_RATE as f64,
         decoder: None,

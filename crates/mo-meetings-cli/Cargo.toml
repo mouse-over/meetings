@@ -1,23 +1,23 @@
 [package]
-name = "meetings-cli"
+name = "mo-meetings-cli"
 description = "Command line interface for local meeting transcription"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
-license.workspace = true
+publish.workspace = true
 repository.workspace = true
 
 [[bin]]
-name = "meetings"
+name = "mo-meetings"
 path = "src/main.rs"
 
 [features]
 default = ["metal"]
 # whisper.cpp on the GPU via Metal (macOS only; build with --no-default-features elsewhere)
-metal = ["meetings-core/metal"]
+metal = ["mo-meetings-core/metal"]
 
 [dependencies]
-meetings-core.workspace = true
+mo-meetings-core.workspace = true
 anyhow.workspace = true
 clap.workspace = true
 indicatif.workspace = true

@@ -4,7 +4,7 @@ fn main() {
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     match os.as_str() {
         "macos" => {
-            // Microsoft's onnxruntime (fetched by meetings-core's build.rs) must win over the bundled one.
+            // Microsoft's onnxruntime (fetched by mo-meetings-core's build.rs) must win over the bundled one.
             println!("cargo:rustc-link-arg-bins=-Wl,-rpath,@executable_path/onnxruntime");
             println!("cargo:rustc-link-arg-bins=-Wl,-rpath,@executable_path");
             println!("cargo:rustc-link-arg-bins=-Wl,-rpath,@executable_path/../Frameworks");

@@ -24,7 +24,7 @@ pub struct ModelInfo {
     pub size: u64,
     pub license: &'static str,
     pub attribution: &'static str,
-    /// Downloaded by `meetings models download` without arguments.
+    /// Downloaded by `mo-meetings models download` without arguments.
     pub default: bool,
 }
 
@@ -79,13 +79,13 @@ pub fn find(id: &str) -> Option<&'static ModelInfo> {
     MODELS.iter().find(|m| m.id == id)
 }
 
-/// Model directory: `$MEETINGS_MODELS_DIR`, else `<user cache>/meetings/models`
-/// (`~/Library/Caches/meetings/models` on macOS, `~/.cache/meetings/models` on Linux).
+/// Model directory: `$MO_MEETINGS_MODELS_DIR`, else `<user cache>/mo-meetings/models`
+/// (`~/Library/Caches/mo-meetings/models` on macOS, `~/.cache/mo-meetings/models` on Linux).
 pub fn models_dir() -> PathBuf {
-    if let Some(d) = std::env::var_os("MEETINGS_MODELS_DIR") {
+    if let Some(d) = std::env::var_os("MO_MEETINGS_MODELS_DIR") {
         return PathBuf::from(d);
     }
-    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("meetings").join("models")
+    dirs::cache_dir().unwrap_or_else(std::env::temp_dir).join("mo-meetings").join("models")
 }
 
 pub fn path(m: &ModelInfo) -> PathBuf {
@@ -182,7 +182,7 @@ mod tests {
 
     #[test]
     fn sha256_of_file() {
-        let p = std::env::temp_dir().join(format!("meetings-sha-{}", std::process::id()));
+        let p = std::env::temp_dir().join(format!("mo-meetings-sha-{}", std::process::id()));
         std::fs::write(&p, b"abc").unwrap();
         assert_eq!(sha256_file(&p).unwrap(), "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad");
         std::fs::remove_file(&p).ok();

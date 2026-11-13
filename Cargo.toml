@@ -1,16 +1,16 @@
 [workspace]
 resolver = "3"
-members = ["crates/meetings-core", "crates/meetings-cli"]
+members = ["crates/mo-meetings-core", "crates/mo-meetings-cli"]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 rust-version = "1.88"
-license = "MIT"
+publish = false
 repository = "https://github.com/mouse-over/meetings"
 
 [workspace.dependencies]
-meetings-core = { path = "crates/meetings-core", default-features = false }
+mo-meetings-core = { path = "crates/mo-meetings-core", default-features = false }
 anyhow = "1.0.104"
 thiserror = "2.0.21"
 serde = { version = "1.0", features = ["derive"] }

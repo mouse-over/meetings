@@ -1,17 +1,21 @@
-//! `meetings`: local meeting transcription with speakers → WebVTT.
+//! `mo-meetings`: local meeting transcription with speakers → WebVTT.
 //!
 //! Exit codes: 0 ok, 2 bad options or input, 3 model missing, 4 processing failed.
 
 use clap::{Parser, Subcommand, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
-use meetings_core::pipeline::{self, Config, Progress, Stage};
-use meetings_core::{Error, models, vtt};
+use mo_meetings_core::pipeline::{self, Config, Progress, Stage};
+use mo_meetings_core::{Error, models, vtt};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 #[derive(Parser)]
-#[command(name = "meetings", version, about = "Local meeting transcription with speaker diarization")]
+#[command(
+    name = "mo-meetings",
+    version,
+    about = "mo-meetings (mouse-over meetings): local meeting transcription with speaker diarization"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
@@ -98,7 +102,7 @@ enum ModelsCommand {
     List,
     /// Download models (default: those needed by `transcribe` with the turbo model)
     Download {
-        /// Model ids (see `meetings models list`)
+        /// Model ids (see `mo-meetings models list`)
         ids: Vec<String>,
         /// Download all models
         #[arg(long, conflicts_with = "ids")]
@@ -186,7 +190,7 @@ fn diarize(input: &Path, output: Option<PathBuf>, num_speakers: Option<u32>, thr
     let (d, duration) = pipeline::run_diarization(input, &cfg)?;
     let label = |s: usize| format!("SPEAKER_{s:02}");
     let turns: Vec<_> = d.turns.iter().map(|t| serde_json::json!([t.start, t.end, label(t.speaker)])).collect();
-    let excl: Vec<_> = meetings_core::assembly::exclusive_turns(&d.turns)
+    let excl: Vec<_> = mo_meetings_core::assembly::exclusive_turns(&d.turns)
         .iter()
         .map(|t| serde_json::json!([t.start, t.end, label(t.speaker)]))
         .collect();

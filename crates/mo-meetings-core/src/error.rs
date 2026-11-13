@@ -5,7 +5,7 @@ use std::path::PathBuf;
 pub enum Error {
     #[error("invalid input: {0}")]
     InvalidInput(String),
-    #[error("model `{id}` not found at {path} (run `meetings models download`)")]
+    #[error("model `{id}` not found at {path} (run `mo-meetings models download`)")]
     ModelMissing { id: String, path: PathBuf },
     #[error("audio decoding failed: {0}")]
     Audio(String),

@@ -1,9 +1,9 @@
 //! macOS/Apple Silicon: fetch Microsoft's onnxruntime release (pinned, SHA-256 verified) into
-//! `<target>/<profile>/onnxruntime/`. Binaries put that directory first in their rpath (see meetings-cli's
+//! `<target>/<profile>/onnxruntime/`. Binaries put that directory first in their rpath (see mo-meetings-cli's
 //! build.rs), so it is used instead of the onnxruntime shipped with the sherpa-onnx release. Both are 1.28.2,
 //! but the sherpa-onnx build ran diarization ~2.3x slower (measured on an M5; the PyPI wheel is fast too).
 //!
-//! Set `MEETINGS_SKIP_ORT_DOWNLOAD=1` to skip (offline builds; diarization is then slower).
+//! Set `MO_MEETINGS_SKIP_ORT_DOWNLOAD=1` to skip (offline builds; diarization is then slower).
 
 use sha2::{Digest, Sha256};
 use std::env;
@@ -15,7 +15,7 @@ const ORT_SHA256: &str = "c4fceacfc53765d0869dc9180c31ec91054d149017a99d1e80ffe2
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
-    println!("cargo:rerun-if-env-changed=MEETINGS_SKIP_ORT_DOWNLOAD");
+    println!("cargo:rerun-if-env-changed=MO_MEETINGS_SKIP_ORT_DOWNLOAD");
     let os = env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     let arch = env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     if os != "macos" {
@@ -26,7 +26,7 @@ fn main() {
     // Unit and integration test binaries are not next to the shared libraries: give them absolute rpaths.
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", profile_dir.join("onnxruntime").display());
     println!("cargo:rustc-link-arg=-Wl,-rpath,{}", profile_dir.display());
-    if arch != "aarch64" || env::var_os("MEETINGS_SKIP_ORT_DOWNLOAD").is_some() {
+    if arch != "aarch64" || env::var_os("MO_MEETINGS_SKIP_ORT_DOWNLOAD").is_some() {
         return;
     }
     if let Err(e) = fetch_ort(&out_dir, &profile_dir.join("onnxruntime")) {
