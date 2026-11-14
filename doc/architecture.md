@@ -104,13 +104,16 @@ as tool results with `isError`; a missing model names `mo-meetings models downlo
 
 ## Desktop app
 
-Scaffolded: `apps/desktop` opens an empty window (Vite + vanilla TypeScript front-end, `src-tauri/` in the Cargo
-workspace). Planned:
+`apps/desktop` (Vite + vanilla TypeScript front-end, `src-tauri/` in the Cargo workspace) uses the core directly:
 
-- **Tauri v2 app** (`apps/desktop`): Rust side calls `pipeline::run` on a worker thread and forwards `Progress` as
-  events; front-end shows stages and chunk progress, plays the recording (HTML `<video>`/`<audio>` from a local
-  asset URL) with the VTT as a synced transcript, click-to-seek. Models downloaded on first start with progress.
-  sherpa-onnx/onnxruntime dylibs go to `Contents/Frameworks` (the CLI already has that rpath).
+- `run.rs` calls `pipeline::run` on a worker thread and forwards `Progress` as events; the front-end shows stages
+  and chunk progress, then plays the recording (HTML `<video>` from an asset URL) next to the synced transcript,
+  click-to-seek. `export.rs` writes the last run's VTT and JSON.
+- `models.rs` is the first-run setup: `model_setup` lists the models a run with the chosen whisper model needs
+  (turbo or large-v3, plus the diarization models), their licenses and `NOTICE`; `download_models` fetches the
+  missing ones on a worker thread with `models::download` (SHA-256 checked, three attempts per model, each resuming
+  the `.part` file with an HTTP range request) and reports `download-progress` events.
+- sherpa-onnx/onnxruntime dylibs go to `Contents/Frameworks` (the CLI already has that rpath).
 
 ## Milestones
 

@@ -88,7 +88,10 @@ A transcription can take minutes; if the client times out tool calls, raise its 
 
 ## Desktop app
 
-`apps/desktop` is a Tauri v2 app (M1, so far an empty window). It needs Rust 1.90+, Node.js 22 and, on Linux, the
+`apps/desktop` is a Tauri v2 app (M1): open a recording, transcribe it with progress, play it next to the synced
+transcript and export VTT and JSON. On first start (or when the chosen whisper model is missing) it downloads the
+models into the same cache as the CLI (`MO_MEETINGS_MODELS_DIR` is respected), with progress, SHA-256 verification
+and automatic retries that resume the partial file. Building it needs Rust 1.90+, Node.js 22 and, on Linux, the
 [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) (`libwebkit2gtk-4.1-dev`, `libxdo-dev`,
 `librsvg2-dev`).
 
