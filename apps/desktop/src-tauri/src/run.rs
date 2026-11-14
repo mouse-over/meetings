@@ -1,13 +1,14 @@
 //! Runs `pipeline::run` on a worker thread and reports to the front-end through events:
 //! `run-progress` ([`ProgressEvent`]), then either `run-finished` ([`RunResult`]) or `run-failed` ([`RunError`]).
 
+use crate::export::{Finished, LastRun};
 use mo_meetings_core::pipeline::{self, Config, Progress, Stage};
 use mo_meetings_core::{Cue, Error};
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use tauri::{AppHandle, Emitter, Runtime, State};
+use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 
 /// Whether a run is in progress; one run at a time (the models take several GB of memory).
 #[derive(Default)]
@@ -80,12 +81,12 @@ pub enum ErrorKind {
 
 #[derive(Clone, Debug, Serialize)]
 pub struct RunError {
-    kind: ErrorKind,
+    pub(crate) kind: ErrorKind,
     message: String,
 }
 
 impl RunError {
-    fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
+    pub(crate) fn new(kind: ErrorKind, message: impl Into<String>) -> Self {
         Self { kind, message: message.into() }
     }
 }
@@ -144,6 +145,7 @@ impl Drop for ClearOnDrop {
 pub fn start_run<R: Runtime>(
     app: AppHandle<R>,
     running: State<'_, Running>,
+    last: State<'_, LastRun>,
     path: PathBuf,
     options: RunOptions,
 ) -> Result<(), RunError> {
@@ -151,6 +153,7 @@ pub fn start_run<R: Runtime>(
     if running.0.swap(true, Ordering::SeqCst) {
         return Err(RunError::new(ErrorKind::Busy, "A recording is already being processed."));
     }
+    last.set(None);
     let guard = ClearOnDrop(running.0.clone());
     std::thread::Builder::new()
         .name("pipeline".into())
@@ -163,15 +166,17 @@ pub fn start_run<R: Runtime>(
             // Clear the flag before the outcome reaches the front-end, so it can start the next run right away.
             drop(guard);
             let _ = match outcome {
-                Ok(Ok(tr)) => app.emit(
-                    "run-finished",
-                    RunResult {
+                Ok(Ok(tr)) => {
+                    let result = RunResult {
                         audio_duration_s: tr.meta.audio_duration_s,
                         num_speakers: tr.meta.num_speakers,
                         processing_s: tr.meta.timings.total_s,
-                        cues: tr.cues,
-                    },
-                ),
+                        cues: tr.cues.clone(),
+                    };
+                    // Stored before the event, so the front-end can export as soon as it shows the transcript.
+                    app.state::<LastRun>().set(Some(Finished { input: path, cues: tr.cues, meta: tr.meta }));
+                    app.emit("run-finished", result)
+                }
                 Ok(Err(e)) => app.emit("run-failed", RunError::from(e)),
                 Err(_) => {
                     app.emit("run-failed", RunError::new(ErrorKind::Processing, "Processing failed unexpectedly."))
@@ -241,13 +246,14 @@ mod tests {
         use serde_json::{Value, json};
         use std::sync::mpsc;
         use std::time::Duration;
+        use tauri::Listener;
         use tauri::test::{MockRuntime, mock_builder, mock_context, noop_assets};
-        use tauri::{Listener, Manager};
 
         fn app() -> (tauri::App<MockRuntime>, tauri::WebviewWindow<MockRuntime>) {
             let app = mock_builder()
                 .manage(Running::default())
-                .invoke_handler(tauri::generate_handler![start_run])
+                .manage(LastRun::default())
+                .invoke_handler(tauri::generate_handler![start_run, crate::export::export_transcript])
                 .build(mock_context(noop_assets()))
                 .unwrap();
             let webview = tauri::WebviewWindowBuilder::new(&app, "main", Default::default()).build().unwrap();
@@ -255,10 +261,14 @@ mod tests {
         }
 
         fn invoke(webview: &tauri::WebviewWindow<MockRuntime>, args: Value) -> Result<Value, Value> {
+            call(webview, "start_run", args)
+        }
+
+        fn call(webview: &tauri::WebviewWindow<MockRuntime>, cmd: &str, args: Value) -> Result<Value, Value> {
             tauri::test::get_ipc_response(
                 webview,
                 tauri::webview::InvokeRequest {
-                    cmd: "start_run".into(),
+                    cmd: cmd.into(),
                     callback: tauri::ipc::CallbackFn(0),
                     error: tauri::ipc::CallbackFn(1),
                     url: "tauri://localhost".parse().unwrap(),
@@ -341,6 +351,19 @@ mod tests {
             let (name, result) = events.last().unwrap();
             assert_eq!(name, "run-finished", "{result}");
             assert!(!result["cues"].as_array().unwrap().is_empty(), "{result}");
+
+            // Export the run as the front-end does after the save dialog; the files stay for inspection.
+            let vtt = std::env::temp_dir().join("mo-meetings-desktop-export.vtt");
+            let out = call(&webview, "export_transcript", json!({"path": vtt})).unwrap();
+            println!("{}", json!({"exported": out}));
+            let text = std::fs::read_to_string(&vtt).unwrap();
+            assert!(text.starts_with("WEBVTT\n\n1\n"), "{text}");
+            assert_eq!(text.matches("<v Speaker ").count(), result["cues"].as_array().unwrap().len());
+            let meta: Value =
+                serde_json::from_str(&std::fs::read_to_string(vtt.with_extension("json")).unwrap()).unwrap();
+            assert_eq!(meta["num_speakers"], result["numSpeakers"]);
+            let name = std::path::Path::new(&path).file_name().unwrap().to_str().unwrap();
+            assert_eq!(meta["input"], name);
         }
     }
 }

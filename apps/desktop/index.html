@@ -46,7 +46,13 @@
       <p id="error" role="alert" hidden></p>
 
       <section id="result" hidden>
-        <p id="summary"></p>
+        <div id="result-head">
+          <div class="row">
+            <p id="summary"></p>
+            <button type="button" id="export">Export VTT and JSON…</button>
+          </div>
+          <p id="export-status" class="muted" role="status" hidden></p>
+        </div>
         <div id="player">
           <video id="media" controls preload="metadata"></video>
           <p id="media-error" class="muted" hidden>This recording can't be played here; the transcript is still below.</p>

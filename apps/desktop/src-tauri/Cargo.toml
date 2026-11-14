@@ -20,6 +20,7 @@ metal = ["mo-meetings-core/metal"]
 [dependencies]
 mo-meetings-core.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 # protocol-asset: the player loads the picked recording through asset://
 tauri = { version = "2.12.5", features = ["protocol-asset"] }
 tauri-plugin-dialog = "2.8.4"
@@ -28,7 +29,6 @@ tauri-plugin-dialog = "2.8.4"
 tauri-build = { version = "2.7.4", features = [] }
 
 [dev-dependencies]
-serde_json.workspace = true
 tauri = { version = "2.12.5", features = ["protocol-asset", "test"] }
 
 [lints]

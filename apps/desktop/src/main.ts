@@ -2,7 +2,7 @@
 // recording next to its transcript.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { open } from "@tauri-apps/plugin-dialog";
+import { open, save } from "@tauri-apps/plugin-dialog";
 
 type Stage = "load" | "decode" | "diarize" | "transcribe" | "assemble";
 
@@ -23,6 +23,11 @@ interface RunResult {
   numSpeakers: number;
   processingS: number;
   cues: Cue[];
+}
+
+interface Exported {
+  vtt: string;
+  json: string;
 }
 
 interface RunError {
@@ -54,6 +59,8 @@ const resultBox = $("result");
 const media = $<HTMLVideoElement>("media");
 const mediaError = $("media-error");
 const cueList = $<HTMLOListElement>("cues");
+const exportButton = $<HTMLButtonElement>("export");
+const exportStatus = $("export-status");
 
 let path: string | null = null;
 /** The recording the shown transcript belongs to. */
@@ -118,6 +125,7 @@ function showResult(r: RunResult) {
     `${r.cues.length} cues, processed in ${r.processingS.toFixed(0)} s.`;
   cues = r.cues;
   activeCue = -1;
+  exportStatus.hidden = true;
   cueList.replaceChildren(
     ...cues.map((c, i) => {
       const li = document.createElement("li");
@@ -203,6 +211,28 @@ cueList.addEventListener("click", (ev) => {
   media.currentTime = cues[i].start + 0.001;
   setActiveCue(i);
   void media.play().catch(() => {});
+});
+
+/** The recording's path with `.vtt` in place of its extension, like the CLI's default output. */
+function defaultVttPath(p: string): string {
+  const dot = p.lastIndexOf(".");
+  const base = dot > Math.max(p.lastIndexOf("/"), p.lastIndexOf("\\")) ? p.slice(0, dot) : p;
+  return `${base}.vtt`;
+}
+
+exportButton.addEventListener("click", async () => {
+  if (runPath === null) return;
+  const target = await save({ defaultPath: defaultVttPath(runPath), filters: [{ name: "WebVTT", extensions: ["vtt"] }] });
+  if (target === null) return;
+  errorBox.hidden = true;
+  try {
+    const out = await invoke<Exported>("export_transcript", { path: target });
+    exportStatus.textContent = `Saved ${out.vtt} and ${out.json}.`;
+    exportStatus.hidden = false;
+  } catch (e) {
+    exportStatus.hidden = true;
+    showError(e as RunError);
+  }
 });
 
 pickButton.addEventListener("click", async () => {
