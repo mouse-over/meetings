@@ -227,6 +227,7 @@ pub fn transcribe_audio(
     timings.asr_s = t.elapsed().as_secs_f64();
     progress(Progress::Finished(Stage::Transcribe, timings.asr_s));
 
+    check()?;
     progress(Progress::Started(Stage::Assemble));
     let t = Instant::now();
     let chunk_languages = results.iter().map(|r| r.language.clone()).collect();
@@ -489,6 +490,22 @@ mod tests {
         assert_eq!((direct.words, direct.cues, direct.turns), (tr.words, tr.cues, tr.turns));
         let chunks: Vec<_> = progress.iter().filter(|p| matches!(p, Progress::Chunk { .. })).collect();
         assert_eq!(chunks.len(), tr.chunks.len());
+
+        // Cancelled during the last chunk: no result.
+        let cancel = AtomicBool::new(false);
+        let r = transcribe_audio(
+            &audio,
+            &mut FakeDiarizer(turns.clone()),
+            &mut FakeAsr::default(),
+            &Config::default(),
+            &mut |p| {
+                if matches!(p, Progress::Chunk { done, total, .. } if done == total) {
+                    cancel.store(true, Ordering::Relaxed);
+                }
+            },
+            &cancel,
+        );
+        assert!(matches!(r, Err(crate::Error::Cancelled)), "{:?}", r.map(|t| t.cues));
 
         let cancelled = transcribe_audio(
             &audio,
