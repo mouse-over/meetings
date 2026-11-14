@@ -15,6 +15,9 @@ pub enum Error {
     Asr(String),
     #[error("model download failed: {0}")]
     Download(String),
+    /// The caller asked the run to stop (see [`crate::pipeline::transcribe_chunks`]).
+    #[error("cancelled")]
+    Cancelled,
     #[error(transparent)]
     Io(#[from] std::io::Error),
 }

@@ -1,6 +1,6 @@
 //! whisper.cpp via `whisper-rs` (Metal on macOS with the `metal` feature, CPU elsewhere).
 
-use super::{Asr, AsrOptions};
+use super::{Asr, AsrOptions, Recognized};
 use crate::{Error, Result, Word};
 use std::path::Path;
 use whisper_rs::{
@@ -52,18 +52,20 @@ impl WhisperAsr {
     }
 }
 
-/// One decoded token: raw bytes (may split UTF-8 characters) and times in seconds.
+/// One decoded token: raw bytes (may split UTF-8 characters), times in seconds and whisper's probability.
 #[derive(Clone, Debug)]
 pub(crate) struct Tok {
     pub bytes: Vec<u8>,
     pub t0: f64,
     pub t1: f64,
     pub dtw: Option<f64>,
+    pub p: f32,
 }
 
 /// Join BPE tokens of one segment into words. A token starting with a space starts a new word.
 /// With DTW times a word spans from its first token's DTW time to the next word's start (capped by the
-/// token-timestamp end of its last token), otherwise it uses token timestamps.
+/// token-timestamp end of its last token), otherwise it uses token timestamps. A word's probability is the
+/// mean of its tokens' probabilities (as faster-whisper does).
 pub(crate) fn words_from_tokens(toks: &[Tok], seg_end: f64) -> Vec<Word> {
     let mut groups: Vec<Vec<&Tok>> = Vec::new();
     for t in toks {
@@ -91,13 +93,14 @@ pub(crate) fn words_from_tokens(toks: &[Tok], seg_end: f64) -> Vec<Word> {
         } else {
             last.t1.max(start + 0.02)
         };
-        words.push(Word::new(text, start, end));
+        let prob = g.iter().map(|t| f64::from(t.p)).sum::<f64>() / g.len() as f64;
+        words.push(Word { prob: Some(prob), ..Word::new(text, start, end) });
     }
     words
 }
 
 impl Asr for WhisperAsr {
-    fn transcribe(&mut self, audio: &[f32], opts: &AsrOptions) -> Result<Vec<Word>> {
+    fn transcribe(&mut self, audio: &[f32], opts: &AsrOptions) -> Result<Recognized> {
         let mut fp =
             FullParams::new(SamplingStrategy::BeamSearch { beam_size: self.params.beam_size as i32, patience: -1.0 });
         fp.set_n_threads(self.params.threads as i32);
@@ -128,11 +131,16 @@ impl Asr for WhisperAsr {
                     t0: d.t0 as f64 / 100.0,
                     t1: d.t1 as f64 / 100.0,
                     dtw: (d.t_dtw >= 0 && self.params.dtw.is_some()).then(|| d.t_dtw as f64 / 100.0),
+                    p: d.p,
                 });
             }
             words.extend(words_from_tokens(&toks, seg_end));
         }
-        Ok(words)
+        let language = match opts.language.as_deref() {
+            Some(l) => Some(l.to_string()),
+            None => whisper_rs::get_lang_str(self.state.full_lang_id_from_state()).map(str::to_string),
+        };
+        Ok(Recognized { words, language })
     }
 
     fn model_name(&self) -> String {
@@ -145,7 +153,7 @@ mod tests {
     use super::*;
 
     fn tok(s: &[u8], t0: f64, t1: f64, dtw: Option<f64>) -> Tok {
-        Tok { bytes: s.to_vec(), t0, t1, dtw }
+        Tok { bytes: s.to_vec(), t0, t1, dtw, p: 0.5 }
     }
 
     #[test]
@@ -171,6 +179,18 @@ mod tests {
         assert_eq!((w[0].start, w[0].end), (0.1, 0.4));
         assert_eq!((w[1].start, w[1].end), (0.4, 2.9));
         assert_eq!((w[2].start, w[2].end), (2.9, 3.2));
+    }
+
+    #[test]
+    fn word_probability_is_the_mean_of_its_tokens() {
+        let toks = [
+            Tok { p: 0.9, ..tok(b" Dob", 0.0, 0.2, None) },
+            Tok { p: 0.3, ..tok(b"ry", 0.2, 0.3, None) },
+            Tok { p: 0.8, ..tok(b" den", 0.3, 0.5, None) },
+        ];
+        let w = words_from_tokens(&toks, 1.0);
+        assert!((w[0].prob.unwrap() - 0.6).abs() < 1e-6, "{w:?}");
+        assert!((w[1].prob.unwrap() - 0.8).abs() < 1e-6, "{w:?}");
     }
 
     #[test]
