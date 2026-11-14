@@ -1,5 +1,5 @@
-// Pick a recording, set the options, run the pipeline in the back-end and follow its progress, then play the
-// recording next to its transcript.
+// Download the models on first start, then pick a recording, set the options, run the pipeline in the back-end and
+// follow its progress, then play the recording next to its transcript.
 import { convertFileSrc, invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open, save } from "@tauri-apps/plugin-dialog";
@@ -31,9 +31,31 @@ interface Exported {
 }
 
 interface RunError {
-  kind: "input" | "modelMissing" | "processing" | "busy";
+  kind: "input" | "modelMissing" | "processing" | "busy" | "download";
   message: string;
 }
+
+interface ModelStatus {
+  id: string;
+  kind: "asr" | "segmentation" | "embedding";
+  size: number;
+  license: string;
+  attribution: string;
+  downloaded: boolean;
+}
+
+interface Setup {
+  dir: string;
+  needed: ModelStatus[];
+  notice: string;
+}
+
+type DownloadEvent =
+  | { kind: "progress"; id: string; index: number; count: number; done: number; total: number }
+  | { kind: "retrying"; id: string; attempt: number; message: string };
+
+const ASR_MODELS = ["whisper-large-v3-turbo", "whisper-large-v3"];
+const ASR_KEY = "asrModel";
 
 const STAGES: [Stage, string][] = [
   ["load", "Loading models"],
@@ -61,6 +83,14 @@ const mediaError = $("media-error");
 const cueList = $<HTMLOListElement>("cues");
 const exportButton = $<HTMLButtonElement>("export");
 const exportStatus = $("export-status");
+const setupBox = $("setup");
+const asrSelect = $<HTMLSelectElement>("asr-model");
+const neededBody = $<HTMLTableElement>("needed").tBodies[0];
+const downloadButton = $<HTMLButtonElement>("download");
+const downloadTotal = $("download-total");
+const downloadBox = $("download-progress");
+const downloadBar = $<HTMLProgressElement>("download-bar");
+const downloadText = $("download-text");
 
 let path: string | null = null;
 /** The recording the shown transcript belongs to. */
@@ -68,6 +98,94 @@ let runPath: string | null = null;
 let running = false;
 let cues: Cue[] = [];
 let activeCue = -1;
+let downloading = false;
+let asrModel = savedAsrModel();
+
+function savedAsrModel(): string {
+  try {
+    const m = localStorage.getItem(ASR_KEY);
+    if (m && ASR_MODELS.includes(m)) return m;
+  } catch {
+    // Storage unavailable: use the default.
+  }
+  return ASR_MODELS[0];
+}
+
+function human(bytes: number): string {
+  return bytes >= 2 ** 30 ? `${(bytes / 2 ** 30).toFixed(1)} GB` : `${Math.max(1, Math.round(bytes / 2 ** 20))} MB`;
+}
+
+/** Shows the setup instead of the form while a model the chosen whisper model needs is missing. */
+async function refreshSetup() {
+  let s: Setup;
+  try {
+    s = await invoke<Setup>("model_setup", { asrModel });
+  } catch (e) {
+    showError(e as RunError);
+    return;
+  }
+  $("models-dir").textContent = s.dir;
+  $("notice").textContent = s.notice;
+  asrSelect.value = asrModel;
+  for (const radio of setupBox.querySelectorAll<HTMLInputElement>('input[name="asr"]')) {
+    radio.checked = radio.value === asrModel;
+  }
+  neededBody.replaceChildren(
+    ...s.needed.map((m) => {
+      const tr = document.createElement("tr");
+      const name = document.createElement("td");
+      name.textContent = m.id;
+      const size = document.createElement("td");
+      size.textContent = human(m.size);
+      const license = document.createElement("td");
+      license.textContent = m.license;
+      const attribution = document.createElement("span");
+      attribution.className = "attribution";
+      attribution.textContent = m.attribution;
+      license.append(attribution);
+      const state = document.createElement("td");
+      state.className = "muted";
+      state.textContent = m.downloaded ? "Downloaded" : "";
+      tr.append(name, size, license, state);
+      return tr;
+    }),
+  );
+  const missing = s.needed.filter((m) => !m.downloaded);
+  const bytes = missing.reduce((sum, m) => sum + m.size, 0);
+  downloadTotal.textContent = missing.length
+    ? `${missing.length} model${missing.length === 1 ? "" : "s"}, ${human(bytes)}`
+    : "";
+  const show = missing.length > 0 || downloading;
+  setupBox.hidden = !show;
+  form.hidden = show;
+}
+
+function chooseAsrModel(m: string) {
+  if (downloading || !ASR_MODELS.includes(m)) return;
+  asrModel = m;
+  try {
+    localStorage.setItem(ASR_KEY, m);
+  } catch {
+    // Not remembered; the choice still applies now.
+  }
+  void refreshSetup();
+}
+
+function setDownloading(on: boolean) {
+  downloading = on;
+  downloadButton.disabled = on;
+  for (const radio of setupBox.querySelectorAll<HTMLInputElement>('input[name="asr"]')) radio.disabled = on;
+  downloadButton.textContent = on ? "Downloading…" : "Download";
+}
+
+function onDownload(e: DownloadEvent) {
+  if (e.kind === "retrying") {
+    downloadText.textContent = `Connection problem with ${e.id}, trying again (attempt ${e.attempt + 1})…`;
+    return;
+  }
+  downloadBar.value = e.total > 0 ? e.done / e.total : 0;
+  downloadText.textContent = `Downloading ${e.id} (${e.index} of ${e.count}) · ${human(e.done)} of ${human(e.total)}`;
+}
 
 function setRunning(on: boolean) {
   running = on;
@@ -76,6 +194,28 @@ function setRunning(on: boolean) {
   for (const el of form.querySelectorAll<HTMLInputElement>("input, select, textarea")) el.disabled = on;
   runButton.textContent = on ? "Transcribing…" : "Transcribe";
 }
+
+setupBox.addEventListener("change", (ev) => {
+  const t = ev.target as HTMLInputElement;
+  if (t.name === "asr") chooseAsrModel(t.value);
+});
+asrSelect.addEventListener("change", () => chooseAsrModel(asrSelect.value));
+
+downloadButton.addEventListener("click", async () => {
+  if (downloading) return;
+  errorBox.hidden = true;
+  downloadBar.value = 0;
+  downloadText.textContent = "Starting the download…";
+  downloadBox.hidden = false;
+  setDownloading(true);
+  try {
+    await invoke("download_models", { asrModel });
+  } catch (e) {
+    setDownloading(false);
+    downloadBox.hidden = true;
+    showError(e as RunError);
+  }
+});
 
 function clock(s: number): string {
   const t = Math.floor(s);
@@ -249,6 +389,7 @@ form.addEventListener("submit", async (ev) => {
   if (running || path === null) return;
   const speakers = $<HTMLInputElement>("speakers").valueAsNumber;
   const options = {
+    asrModel,
     language: $<HTMLSelectElement>("language").value,
     prompt: $<HTMLTextAreaElement>("prompt").value,
     numSpeakers: Number.isFinite(speakers) ? speakers : null,
@@ -276,4 +417,18 @@ void listen<RunResult>("run-finished", (e) => {
 void listen<RunError>("run-failed", (e) => {
   setRunning(false);
   showError(e.payload);
+  if (e.payload.kind === "modelMissing") void refreshSetup();
 });
+void listen<DownloadEvent>("download-progress", (e) => onDownload(e.payload));
+void listen("download-finished", () => {
+  setDownloading(false);
+  downloadBox.hidden = true;
+  void refreshSetup();
+});
+void listen<RunError>("download-failed", (e) => {
+  setDownloading(false);
+  downloadButton.textContent = "Retry download";
+  showError(e.payload);
+});
+
+void refreshSetup();

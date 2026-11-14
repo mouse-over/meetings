@@ -9,7 +9,40 @@
   </head>
   <body>
     <main id="app">
-      <form id="run-form">
+      <section id="setup" hidden>
+        <h1>Download the models</h1>
+        <p>
+          Transcription runs on this computer with these models. They are downloaded once, checked against their
+          SHA-256 and shared with the <code>mo-meetings</code> command line.
+        </p>
+        <fieldset id="asr-choice">
+          <legend>Speech recognition</legend>
+          <label>
+            <input type="radio" name="asr" value="whisper-large-v3-turbo" checked />
+            Whisper large-v3-turbo <span class="muted">· faster, recommended</span>
+          </label>
+          <label>
+            <input type="radio" name="asr" value="whisper-large-v3" />
+            Whisper large-v3 <span class="muted">· slower, slightly more accurate</span>
+          </label>
+        </fieldset>
+        <table id="needed">
+          <thead>
+            <tr><th>Model</th><th>Size</th><th>License</th><th></th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+        <div class="row">
+          <button type="button" id="download">Download</button>
+          <span id="download-total" class="muted"></span>
+        </div>
+        <div id="download-progress" hidden>
+          <progress id="download-bar" max="1" value="0"></progress>
+          <div id="download-text" class="muted" role="status"></div>
+        </div>
+      </section>
+
+      <form id="run-form" hidden>
         <div class="row">
           <button type="button" id="pick">Open recording…</button>
           <span id="file" class="muted">No recording selected</span>
@@ -23,6 +56,13 @@
               <option value="sk">Slovak</option>
               <option value="de">German</option>
               <option value="auto">Detect</option>
+            </select>
+          </label>
+          <label>
+            Model
+            <select id="asr-model">
+              <option value="whisper-large-v3-turbo">large-v3-turbo</option>
+              <option value="whisper-large-v3">large-v3</option>
             </select>
           </label>
           <label>
@@ -59,6 +99,12 @@
         </div>
         <ol id="cues"></ol>
       </section>
+
+      <details id="licenses">
+        <summary>Models and licenses</summary>
+        <p>Model folder: <code id="models-dir"></code></p>
+        <pre id="notice"></pre>
+      </details>
     </main>
   </body>
 </html>

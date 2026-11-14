@@ -17,6 +17,8 @@ pub struct Running(Arc<AtomicBool>);
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunOptions {
+    /// Registry id of the whisper model (`whisper-large-v3-turbo` or `whisper-large-v3`).
+    asr_model: String,
     /// ISO 639-1 code (`cs`, `en`, …) or `auto`.
     language: String,
     /// Glossary prompt given to whisper with every chunk.
@@ -75,8 +77,10 @@ pub enum ErrorKind {
     ModelMissing,
     /// The pipeline failed on a valid input.
     Processing,
-    /// A run is already in progress.
+    /// A run (or a download) is already in progress.
     Busy,
+    /// Downloading the models failed.
+    Download,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -102,8 +106,7 @@ impl From<Error> for RunError {
             Error::ModelMissing { id, path } => Self::new(
                 ErrorKind::ModelMissing,
                 format!(
-                    "The model `{id}` is not downloaded (expected at {}). Download the models with \
-                     `mo-meetings models download` and try again.",
+                    "The model `{id}` is not downloaded (expected at {}). Download it below and try again.",
                     path.display()
                 ),
             ),
@@ -122,6 +125,8 @@ fn parse_language(l: &str) -> Result<Option<String>, RunError> {
 
 fn config(o: RunOptions) -> Result<Config, RunError> {
     let mut cfg = Config::default();
+    crate::models::needed(&o.asr_model)?;
+    cfg.asr_model = o.asr_model;
     cfg.asr.language = parse_language(&o.language)?;
     cfg.asr.prompt = Some(o.prompt.trim().to_string()).filter(|s| !s.is_empty());
     cfg.num_speakers = match o.num_speakers {
@@ -192,12 +197,18 @@ mod tests {
     use super::*;
 
     fn opts(language: &str, num_speakers: Option<u32>) -> RunOptions {
-        RunOptions { language: language.into(), prompt: "  ".into(), num_speakers }
+        RunOptions {
+            asr_model: "whisper-large-v3-turbo".into(),
+            language: language.into(),
+            prompt: "  ".into(),
+            num_speakers,
+        }
     }
 
     #[test]
     fn options_map_to_config() {
         let cfg = config(RunOptions { prompt: " Kubernetes ".into(), ..opts("en", Some(3)) }).unwrap();
+        assert_eq!(cfg.asr_model, "whisper-large-v3-turbo");
         assert_eq!(cfg.asr.language.as_deref(), Some("en"));
         assert_eq!(cfg.asr.prompt.as_deref(), Some("Kubernetes"));
         assert_eq!(cfg.num_speakers, Some(3));
@@ -212,13 +223,15 @@ mod tests {
     fn bad_options_are_input_errors() {
         assert_eq!(config(opts("english", None)).unwrap_err().kind, ErrorKind::Input);
         assert_eq!(config(opts("cs", Some(0))).unwrap_err().kind, ErrorKind::Input);
+        let o = RunOptions { asr_model: "titanet-large".into(), ..opts("cs", None) };
+        assert_eq!(config(o).unwrap_err().kind, ErrorKind::Input);
     }
 
     #[test]
     fn errors_map_to_kinds() {
         let e = RunError::from(Error::ModelMissing { id: "titanet-large".into(), path: "/m/x.onnx".into() });
         assert_eq!(e.kind, ErrorKind::ModelMissing);
-        assert!(e.message.contains("mo-meetings models download"), "{}", e.message);
+        assert!(e.message.contains("Download it below"), "{}", e.message);
         assert_eq!(RunError::from(Error::InvalidInput("input file not found: /x".into())).kind, ErrorKind::Input);
         assert_eq!(RunError::from(Error::Audio("unsupported codec".into())).kind, ErrorKind::Input);
         assert_eq!(RunError::from(Error::Asr("boom".into())).kind, ErrorKind::Processing);
@@ -308,7 +321,7 @@ mod tests {
         fn missing_file_fails_with_an_input_error_and_frees_the_runner() {
             let (app, webview) = app();
             let rx = collect(&app);
-            let args = json!({"path": "/nonexistent/meeting.mp4", "options": {"language": "cs", "prompt": ""}});
+            let args = json!({"path": "/nonexistent/meeting.mp4", "options": {"asrModel": "whisper-large-v3-turbo", "language": "cs", "prompt": ""}});
             assert_eq!(invoke(&webview, args.clone()), Ok(Value::Null));
             let events = wait_outcome(&rx, Duration::from_secs(10));
             let (name, payload) = events.last().unwrap();
@@ -323,7 +336,7 @@ mod tests {
         fn a_second_run_is_refused_while_one_is_running() {
             let (app, webview) = app();
             app.state::<Running>().0.store(true, Ordering::SeqCst);
-            let args = json!({"path": "/x.mp4", "options": {"language": "cs", "prompt": "", "numSpeakers": 2}});
+            let args = json!({"path": "/x.mp4", "options": {"asrModel": "whisper-large-v3-turbo", "language": "cs", "prompt": "", "numSpeakers": 2}});
             assert_eq!(invoke(&webview, args).unwrap_err()["kind"], "busy");
         }
 
@@ -335,7 +348,7 @@ mod tests {
             let path = std::env::var("MO_MEETINGS_DESKTOP_SAMPLE").expect("set MO_MEETINGS_DESKTOP_SAMPLE");
             let (app, webview) = app();
             let rx = collect(&app);
-            let args = json!({"path": path, "options": {"language": "en", "prompt": "Kubernetes, backlog", "numSpeakers": null}});
+            let args = json!({"path": path, "options": {"asrModel": "whisper-large-v3-turbo", "language": "en", "prompt": "Kubernetes, backlog", "numSpeakers": null}});
             assert_eq!(invoke(&webview, args), Ok(Value::Null));
             let events = wait_outcome(&rx, Duration::from_secs(600));
             for (name, payload) in &events {
