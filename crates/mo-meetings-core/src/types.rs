@@ -25,11 +25,15 @@ pub struct Word {
     pub end: f64,
     /// Internal speaker id after assignment (see [`crate::assembly::assign_speakers`]).
     pub speaker: Option<usize>,
+    /// Recognition probability in 0..=1 (whisper token probabilities averaged over the word), for
+    /// highlighting uncertain words. `None` when the backend does not report one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub prob: Option<f64>,
 }
 
 impl Word {
     pub fn new(text: impl Into<String>, start: f64, end: f64) -> Self {
-        Self { text: text.into(), start, end, speaker: None }
+        Self { text: text.into(), start, end, speaker: None, prob: None }
     }
 }
 

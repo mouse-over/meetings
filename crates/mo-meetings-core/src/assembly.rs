@@ -137,7 +137,7 @@ mod tests {
     use super::*;
 
     fn w(text: &str, start: f64, end: f64, speaker: usize) -> Word {
-        Word { text: text.into(), start, end, speaker: Some(speaker) }
+        Word { speaker: Some(speaker), ..Word::new(text, start, end) }
     }
 
     #[test]
