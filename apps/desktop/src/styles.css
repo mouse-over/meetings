@@ -105,8 +105,18 @@ form {
   grid-template-areas: "summary" "player" "cues";
 }
 
-#summary {
+#result-head {
   grid-area: summary;
+}
+
+#result-head .row {
+  flex-wrap: wrap;
+  justify-content: space-between;
+}
+
+#export-status {
+  margin-top: 0;
+  word-break: break-all;
 }
 
 #player {
