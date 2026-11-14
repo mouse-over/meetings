@@ -119,6 +119,7 @@ fn hex(bytes: &[u8]) -> String {
 
 /// Download `m` into [`models_dir`] (via a `.part` file), verifying SHA-256. Skips a file that already
 /// exists with the right size unless `verify_existing` is set, in which case its hash is checked too.
+/// A `.part` left by an interrupted download is resumed with an HTTP range request when the server allows it.
 /// `progress(done, total)` is called while downloading.
 pub fn download(m: &ModelInfo, verify_existing: bool, progress: &mut dyn FnMut(u64, u64)) -> Result<PathBuf> {
     let dest = path(m);
@@ -130,20 +131,53 @@ pub fn download(m: &ModelInfo, verify_existing: bool, progress: &mut dyn FnMut(u
     }
     std::fs::create_dir_all(models_dir())?;
     let part = dest.with_extension("part");
-    let resp = ureq::get(m.url).call().map_err(|e| Error::Download(format!("{}: {e}", m.url)))?;
-    let total = resp
-        .headers()
-        .get("content-length")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(m.size);
-    let mut reader = resp.into_body().into_reader();
-    let mut file = std::fs::File::create(&part)?;
+    let fail = |e: &dyn std::fmt::Display| Error::Download(format!("{}: {e}", m.url));
+
+    // Bytes already on disk from an earlier attempt; a part as large as the model can't be resumed.
+    let mut have = std::fs::metadata(&part).map(|md| md.len()).unwrap_or(0);
+    if have >= m.size {
+        std::fs::remove_file(&part).ok();
+        have = 0;
+    }
+    let mut req = ureq::get(m.url);
+    if have > 0 {
+        req = req.header("Range", format!("bytes={have}-"));
+    }
+    let resp = match req.call() {
+        Ok(r) => r,
+        Err(e) => {
+            // 416: the server rejects the range, so the part is unusable; the next attempt starts over.
+            if matches!(e, ureq::Error::StatusCode(416)) {
+                std::fs::remove_file(&part).ok();
+            }
+            return Err(fail(&e));
+        }
+    };
+    let resumed = have > 0 && resp.status().as_u16() == 206;
     let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; 1 << 20];
     let mut done = 0u64;
+    if resumed {
+        let mut f = std::fs::File::open(&part)?;
+        let mut buf = vec![0u8; 1 << 20];
+        loop {
+            let n = f.read(&mut buf)?;
+            if n == 0 {
+                break;
+            }
+            hasher.update(&buf[..n]);
+            done += n as u64;
+        }
+    }
+    let rest: Option<u64> =
+        resp.headers().get("content-length").and_then(|v| v.to_str().ok()).and_then(|v| v.parse().ok());
+    let total = rest.map_or(m.size, |n| done + n);
+    let mut reader = resp.into_body().into_reader();
+    let mut file =
+        if resumed { std::fs::OpenOptions::new().append(true).open(&part)? } else { std::fs::File::create(&part)? };
+    progress(done, total);
+    let mut buf = vec![0u8; 1 << 20];
     loop {
-        let n = reader.read(&mut buf).map_err(|e| Error::Download(format!("{}: {e}", m.url)))?;
+        let n = reader.read(&mut buf).map_err(|e| fail(&e))?;
         if n == 0 {
             break;
         }
@@ -154,6 +188,10 @@ pub fn download(m: &ModelInfo, verify_existing: bool, progress: &mut dyn FnMut(u
     }
     file.sync_all()?;
     drop(file);
+    if done != m.size {
+        // Connection closed early: keep the part for the next attempt to resume.
+        return Err(Error::Download(format!("{}: download ended after {done} of {} bytes", m.id, m.size)));
+    }
     let got = hex(&hasher.finalize());
     if got != m.sha256 {
         std::fs::remove_file(&part).ok();
