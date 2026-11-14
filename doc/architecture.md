@@ -51,13 +51,25 @@ speakers without re-running ASR).
 ```rust
 pub trait Diarizer { fn diarize(&mut self, audio: &[f32], opts: &DiarizeOptions) -> Result<Diarization>; }
 pub trait SpeakerEmbedder { fn embed_spans(&self, audio: &[f32], spans: &[(f64, f64)]) -> Result<Vec<Option<Vec<f32>>>>; }
-pub trait Asr { fn transcribe(&mut self, audio: &[f32], opts: &AsrOptions) -> Result<Vec<Word>>; fn model_name(&self) -> String; }
-pub fn pipeline::transcribe_audio(audio, &mut dyn Diarizer, &mut dyn Asr, &Config, progress) -> Result<Transcript>;
+pub trait Asr { fn transcribe(&mut self, audio: &[f32], opts: &AsrOptions) -> Result<Recognized>; fn model_name(&self) -> String; }
+
+// Steps, callable one by one
+pub fn pipeline::diarize(audio, &mut dyn Diarizer, num_speakers) -> Result<Diarization>;
+pub fn pipeline::speech_chunks(&[Turn], audio, &ChunkRules) -> Vec<Chunk>;
+pub fn pipeline::transcribe_chunks(audio, &[Chunk], &mut dyn Asr, &AsrOptions, sink, cancel: &AtomicBool) -> Result<Vec<ChunkResult>>;
+pub fn pipeline::assemble(Vec<Word>, &[Turn], &CueRules) -> Assembled;   // words with speakers, exclusive turns, cues
+
+// The steps chained
+pub fn pipeline::transcribe_audio(audio, &mut dyn Diarizer, &mut dyn Asr, &Config, progress, cancel) -> Result<Transcript>;
 pub fn pipeline::run(input, &Config, progress) -> Result<Transcript>;   // bundled backends + cached models
+pub fn pipeline::run_cancellable(input, &Config, progress, cancel) -> Result<Transcript>;
 ```
 
-`transcribe_audio` is backend-agnostic; `run` wires sherpa-onnx + whisper.cpp and the model cache. Errors carry
-the CLI exit code (`Error::exit_code`: 2 input, 3 model missing, 4 processing).
+`transcribe_audio` is backend-agnostic; `run` wires sherpa-onnx + whisper.cpp and the model cache.
+`transcribe_chunks` takes any subset of chunks and per-call options, so one loaded model can re-transcribe some
+chunks differently; `sink` gets each chunk's words (with `Word.prob` and the language used or detected) as soon as
+the chunk is done. `cancel` is checked before every chunk and between the steps and ends the run with
+`Error::Cancelled`. Errors carry the CLI exit code (`Error::exit_code`: 2 input, 3 model missing, 4 processing).
 
 ## Dependency choices (versions checked on crates.io, 2026-11-13)
 
