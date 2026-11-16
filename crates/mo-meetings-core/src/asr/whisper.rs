@@ -164,6 +164,10 @@ impl Asr for WhisperAsr {
         fp.set_print_special(false);
         fp.set_print_timestamps(false);
         fp.set_suppress_blank(true);
+        // A fresh state per chunk: whisper.cpp seeds the sampling RNG of its first decoder only when a state is
+        // created, so with a reused state a chunk's temperature fallback depended on the chunks transcribed
+        // before it. Now a chunk gives the same words in a full run, a resumed run or a re-run of some chunks.
+        self.state = self.ctx.create_state().map_err(|e| Error::Asr(format!("cannot create whisper state: {e}")))?;
         self.state.full(fp, audio).map_err(|e| Error::Asr(format!("whisper failed: {e}")))?;
         let mut words = Vec::new();
         for seg in self.state.as_iter() {

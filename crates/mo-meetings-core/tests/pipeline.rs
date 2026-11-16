@@ -58,7 +58,18 @@ fn runs_the_steps_one_by_one() {
     let no = AtomicBool::new(false);
     let auto = AsrOptions { language: None, prompt: None };
     let mut streamed = 0;
-    let all = pipeline::transcribe_chunks(&audio, &chunks, &mut asr, &auto, &mut |_| streamed += 1, &no).unwrap();
+    let all = pipeline::transcribe_chunks(
+        &audio,
+        &chunks,
+        &mut asr,
+        &auto,
+        &mut |_| {
+            streamed += 1;
+            Ok(())
+        },
+        &no,
+    )
+    .unwrap();
     assert_eq!(streamed, chunks.len());
     for r in &all {
         eprintln!(
@@ -74,7 +85,7 @@ fn runs_the_steps_one_by_one() {
 
     // The same model, one chunk again with a forced language.
     let en = AsrOptions { language: Some("en".into()), prompt: None };
-    let again = pipeline::transcribe_chunks(&audio, &chunks[1..2], &mut asr, &en, &mut |_| {}, &no).unwrap();
+    let again = pipeline::transcribe_chunks(&audio, &chunks[1..2], &mut asr, &en, &mut |_| Ok(()), &no).unwrap();
     assert_eq!(again[0].language.as_deref(), Some("en"));
     assert_eq!(again[0].chunk, chunks[1]);
 
@@ -84,6 +95,6 @@ fn runs_the_steps_one_by_one() {
     let unsure = a.words.iter().filter(|w| w.prob.is_some_and(|p| p < 0.5)).count();
     eprintln!("{} words, {unsure} with probability < 0.5", a.words.len());
 
-    let r = pipeline::transcribe_chunks(&audio, &chunks, &mut asr, &auto, &mut |_| {}, &AtomicBool::new(true));
+    let r = pipeline::transcribe_chunks(&audio, &chunks, &mut asr, &auto, &mut |_| Ok(()), &AtomicBool::new(true));
     assert!(matches!(r, Err(Error::Cancelled)));
 }

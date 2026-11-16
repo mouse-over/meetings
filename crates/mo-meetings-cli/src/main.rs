@@ -7,6 +7,7 @@ use indicatif::{ProgressBar, ProgressStyle};
 use mo_meetings_core::pipeline::{self, Config, Progress, Stage};
 use mo_meetings_core::profile::{self, Profiles};
 use mo_meetings_core::{Error, asr, models, vtt};
+use mo_meetings_project::Project;
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -85,9 +86,15 @@ impl ModelChoice {
 
 #[derive(clap::Args)]
 struct TranscribeArgs {
-    /// Input recording
-    input: PathBuf,
-    /// Output VTT (default: input with .vtt extension)
+    /// Input recording (with an existing `--project`: optional, the project's recording, or its new path when
+    /// it moved)
+    #[arg(required_unless_present = "project")]
+    input: Option<PathBuf>,
+    /// Project file (e.g. `meeting.mom`): created for the recording when missing; stores the run and resumes an
+    /// interrupted run with the same settings
+    #[arg(long)]
+    project: Option<PathBuf>,
+    /// Output VTT (default: recording with .vtt extension)
     #[arg(short, long)]
     output: Option<PathBuf>,
     /// Also write metadata JSON next to the VTT
@@ -150,7 +157,11 @@ fn main() -> ExitCode {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e:#}");
-            let code = e.downcast_ref::<Error>().map_or(4, Error::exit_code);
+            let code = match (e.downcast_ref::<Error>(), e.downcast_ref::<mo_meetings_project::Error>()) {
+                (Some(e), _) => e.exit_code(),
+                (_, Some(e)) => e.exit_code(),
+                _ => 4,
+            };
             ExitCode::from(code as u8)
         }
     }
@@ -168,8 +179,36 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
         ),
         _ => None,
     };
-    let output = args.output.clone().unwrap_or_else(|| args.input.with_extension("vtt"));
-    if output == args.input {
+    let mut project = match &args.project {
+        Some(path) if path.exists() => {
+            let mut p = Project::open(path)?;
+            if let Some(input) = &args.input {
+                p.locate(input)?;
+            }
+            Some(p)
+        }
+        Some(path) => match &args.input {
+            Some(input) => {
+                let p = Project::create(path, input)?;
+                eprintln!("created project {}", p.path().display());
+                Some(p)
+            }
+            None => {
+                return Err(invalid(format!(
+                    "project not found: {} (give the recording to create it)",
+                    path.display()
+                )));
+            }
+        },
+        None => None,
+    };
+    let input = match (&project, &args.input) {
+        (Some(p), _) => p.recording()?,
+        (None, Some(input)) => input.clone(),
+        (None, None) => return Err(invalid("no recording given")),
+    };
+    let output = args.output.clone().unwrap_or_else(|| input.with_extension("vtt"));
+    if std::path::absolute(&output)? == std::path::absolute(&input)? {
         return Err(invalid("output would overwrite the input"));
     }
     let mut cfg = Config { threads: args.threads as usize, ..Default::default() };
@@ -184,7 +223,7 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
                 resolved.sources.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" → ")
             );
         }
-        None => suggest_profile(&args.input),
+        None => suggest_profile(&input),
     }
     if let Some(l) = &args.language {
         cfg.asr.language = asr::parse_language(l)?;
@@ -200,8 +239,28 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
     }
 
     let mut reporter = Reporter::new();
-    let tr = pipeline::run(&args.input, &cfg, &mut |p| reporter.on(p))?;
-    reporter.done();
+    let tr = match &mut project {
+        Some(p) => {
+            let out = p.transcribe(&cfg, &mut |pr| reporter.on(pr), &std::sync::atomic::AtomicBool::new(false));
+            reporter.done();
+            let out = out?;
+            if out.resumed_diarization {
+                eprintln!(
+                    "resumed run {}: diarization and {} of {} chunks from the interrupted run",
+                    out.run_id,
+                    out.resumed_chunks,
+                    out.transcript.chunks.len()
+                );
+            }
+            eprintln!("saved run {} in {}", out.run_id, p.path().display());
+            out.transcript
+        }
+        None => {
+            let tr = pipeline::run(&input, &cfg, &mut |p| reporter.on(p))?;
+            reporter.done();
+            tr
+        }
+    };
 
     std::fs::write(&output, vtt::render(&tr.cues))?;
     eprintln!(
