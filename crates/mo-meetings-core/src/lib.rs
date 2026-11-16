@@ -12,6 +12,7 @@ pub mod diarize;
 mod error;
 pub mod models;
 pub mod pipeline;
+pub mod profile;
 pub mod types;
 pub mod vtt;
 
