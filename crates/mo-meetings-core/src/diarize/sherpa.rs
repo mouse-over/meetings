@@ -116,6 +116,7 @@ impl Diarizer for SherpaDiarizer {
             turns,
             report,
             timings: vec![("sherpa_s".into(), sherpa_s), ("embed_s".into(), embed_s)],
+            embeddings: emb,
         })
     }
 }

@@ -10,7 +10,7 @@ prompt in every chunk) → words assigned to speakers → cues → VTT. See [`do
 
 ## Build
 
-Rust 1.88+, CMake and a C/C++ toolchain (whisper.cpp is compiled from source). On macOS Metal is on by default.
+Rust 1.89+, CMake and a C/C++ toolchain (whisper.cpp is compiled from source). On macOS Metal is on by default.
 
 ```sh
 cargo build --release                         # macOS (Metal)
@@ -87,6 +87,17 @@ max_duration = 6.0
 `mo-meetings profiles list [--for recording.mp4]` lists the profiles, their files and which ones match a recording;
 `profiles show NAME` prints a profile with everything it extends merged in; `profiles path` prints the directories.
 Without `--profile`, `transcribe` prints a hint when a profile matches the recording's file name.
+
+### Project files
+
+`mo-meetings transcribe meeting.mp4 --project meeting.mom` keeps the work on a meeting in one SQLite file: each run
+with its settings, the diarization turns (with speaker embeddings), the speech chunks, the words with their
+probabilities and the cues. The words are saved as each chunk finishes, so a run that was interrupted (killed,
+crashed, failed) continues from the next chunk when you run the same command with the same settings again;
+different settings start a new run. The recording is referenced, not copied: when it has moved, give its new
+path (`mo-meetings transcribe new/place.mp4 --project meeting.mom`) and the project checks it is the same file
+(size and a hash of its start). A project that moved together with its recording finds it on its own. With an
+existing project the recording can be left out: `mo-meetings transcribe --project meeting.mom`.
 
 Models live in `~/Library/Caches/mo-meetings/models` (macOS) `~/.cache/mo-meetings/models` (Linux) or
 `%LOCALAPPDATA%\mo-meetings\models` (Windows); override

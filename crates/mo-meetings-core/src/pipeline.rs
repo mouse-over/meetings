@@ -69,6 +69,24 @@ impl Default for Config {
     }
 }
 
+impl Config {
+    /// The settings that change a run's result (not `threads` or `profile`), as JSON: stored with a run in a
+    /// project file and compared to decide whether an interrupted run can be resumed.
+    pub fn settings_json(&self) -> serde_json::Value {
+        let c = &self.chunk_rules;
+        let q = &self.cue_rules;
+        serde_json::json!({
+            "model": self.asr_model,
+            "language": self.asr.language,
+            "prompt": self.asr.prompt,
+            "num_speakers": self.num_speakers,
+            "chunks": {"max_len": c.max_len, "max_gap": c.max_gap, "pad": c.pad, "search": c.search},
+            "cues": {"max_pause": q.max_pause, "max_duration": q.max_duration,
+                     "sentence_min_duration": q.sentence_min_duration},
+        })
+    }
+}
+
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct Timings {
     pub load_s: f64,
@@ -141,14 +159,14 @@ pub struct ChunkResult {
 
 /// Step 3: transcribes `chunks` (all of a recording, or any subset) with `opts`. The loaded model is reused,
 /// so the same `asr` can transcribe other chunks with other options afterwards. `sink` gets each chunk's
-/// words as soon as the chunk is done; `cancel` is checked before every chunk and stops with
-/// [`crate::Error::Cancelled`].
+/// words as soon as the chunk is done (e.g. to store them) and stops the run when it returns an error;
+/// `cancel` is checked before every chunk and stops with [`crate::Error::Cancelled`].
 pub fn transcribe_chunks(
     audio: &[f32],
     chunks: &[Chunk],
     asr: &mut dyn Asr,
     opts: &AsrOptions,
-    sink: &mut dyn FnMut(&ChunkResult),
+    sink: &mut dyn FnMut(&ChunkResult) -> Result<()>,
     cancel: &AtomicBool,
 ) -> Result<Vec<ChunkResult>> {
     let mut out = Vec::with_capacity(chunks.len());
@@ -169,7 +187,7 @@ pub fn transcribe_chunks(
             })
             .collect();
         let r = ChunkResult { index, chunk: *c, words, language: rec.language };
-        sink(&r);
+        sink(&r)?;
         out.push(r);
     }
     Ok(out)
@@ -195,6 +213,36 @@ pub fn assemble(mut words: Vec<Word>, turns: &[Turn], rules: &CueRules) -> Assem
     Assembled { words, turns, cues }
 }
 
+/// Work already done by an earlier run with the same settings that was interrupted (see [`transcribe_audio_with`]).
+#[derive(Clone, Debug, Default)]
+pub struct Resume {
+    /// Diarization and the chunks built from it; with `None` both are computed.
+    pub prepared: Option<(Diarization, Vec<Chunk>)>,
+    /// Chunks already transcribed, `index` into the chunks of `prepared`; only these are not transcribed again.
+    pub done: Vec<ChunkResult>,
+}
+
+/// Receives a run's intermediate data as soon as it exists, e.g. to save it so an interrupted run can be resumed.
+/// An error stops the run.
+pub trait RunStore {
+    /// The diarization and the chunks (not called when they come from [`Resume::prepared`]).
+    fn prepared(&mut self, diarization: &Diarization, chunks: &[Chunk]) -> Result<()>;
+    /// One transcribed chunk; `result.index` is its position in the run's chunks.
+    fn chunk_done(&mut self, result: &ChunkResult) -> Result<()>;
+}
+
+/// A [`RunStore`] that keeps nothing.
+pub struct NoStore;
+
+impl RunStore for NoStore {
+    fn prepared(&mut self, _: &Diarization, _: &[Chunk]) -> Result<()> {
+        Ok(())
+    }
+    fn chunk_done(&mut self, _: &ChunkResult) -> Result<()> {
+        Ok(())
+    }
+}
+
 /// Backend-agnostic core: audio (16 kHz mono) → transcript. `meta.input`, `decoder` and load/decode
 /// timings are left for the caller to fill. `cancel` is checked between the steps and between chunks.
 pub fn transcribe_audio(
@@ -205,39 +253,85 @@ pub fn transcribe_audio(
     progress: &mut dyn FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<Transcript> {
+    transcribe_audio_with(audio, diarizer, asr, cfg, Resume::default(), &mut NoStore, progress, cancel)
+}
+
+/// [`transcribe_audio`] that continues from `resume` (skipping the diarization and the chunks done there) and
+/// hands the intermediate data to `store` as it is produced.
+#[allow(clippy::too_many_arguments)]
+pub fn transcribe_audio_with(
+    audio: &[f32],
+    diarizer: &mut dyn Diarizer,
+    asr: &mut dyn Asr,
+    cfg: &Config,
+    resume: Resume,
+    store: &mut dyn RunStore,
+    progress: &mut dyn FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<Transcript> {
     let mut timings = Timings::default();
     let check = || if cancel.load(Ordering::Relaxed) { Err(crate::Error::Cancelled) } else { Ok(()) };
 
     check()?;
-    progress(Progress::Started(Stage::Diarize));
-    let t = Instant::now();
-    let diarization = diarize(audio, diarizer, cfg.num_speakers)?;
-    timings.diarize_s = t.elapsed().as_secs_f64();
-    progress(Progress::Finished(Stage::Diarize, timings.diarize_s));
+    let (diarization, chunks) = match resume.prepared {
+        Some(p) => p,
+        None => {
+            progress(Progress::Started(Stage::Diarize));
+            let t = Instant::now();
+            let diarization = diarize(audio, diarizer, cfg.num_speakers)?;
+            timings.diarize_s = t.elapsed().as_secs_f64();
+            progress(Progress::Finished(Stage::Diarize, timings.diarize_s));
+            let chunks = speech_chunks(&diarization.turns, audio, &cfg.chunk_rules);
+            store.prepared(&diarization, &chunks)?;
+            (diarization, chunks)
+        }
+    };
 
     check()?;
     progress(Progress::Started(Stage::Transcribe));
     let t = Instant::now();
-    let chunks = speech_chunks(&diarization.turns, audio, &cfg.chunk_rules);
+    let mut results: Vec<Option<ChunkResult>> = vec![None; chunks.len()];
+    for r in resume.done {
+        if r.index >= chunks.len() || r.chunk != chunks[r.index] {
+            return Err(crate::Error::InvalidInput(format!(
+                "resumed chunk {} does not match the run's chunks",
+                r.index
+            )));
+        }
+        let i = r.index;
+        results[i] = Some(r);
+    }
+    let todo: Vec<usize> = (0..chunks.len()).filter(|&i| results[i].is_none()).collect();
+    let todo_chunks: Vec<Chunk> = todo.iter().map(|&i| chunks[i]).collect();
     let audio_total: f64 = chunks.iter().map(|c| c.end - c.start).sum();
-    let mut audio_done = 0.0;
-    let results = transcribe_chunks(
+    let mut audio_done: f64 = results.iter().flatten().map(|r| r.chunk.end - r.chunk.start).sum();
+    let mut done = chunks.len() - todo.len();
+    let fresh = transcribe_chunks(
         audio,
-        &chunks,
+        &todo_chunks,
         asr,
         &cfg.asr,
         &mut |r| {
+            let r = ChunkResult { index: todo[r.index], ..r.clone() };
+            store.chunk_done(&r)?;
+            done += 1;
             audio_done += r.chunk.end - r.chunk.start;
-            progress(Progress::Chunk { done: r.index + 1, total: chunks.len(), audio_done, audio_total });
+            progress(Progress::Chunk { done, total: chunks.len(), audio_done, audio_total });
+            Ok(())
         },
         cancel,
     )?;
+    for r in fresh {
+        let i = todo[r.index];
+        results[i] = Some(ChunkResult { index: i, ..r });
+    }
     timings.asr_s = t.elapsed().as_secs_f64();
     progress(Progress::Finished(Stage::Transcribe, timings.asr_s));
 
     check()?;
     progress(Progress::Started(Stage::Assemble));
     let t = Instant::now();
+    let results: Vec<ChunkResult> = results.into_iter().flatten().collect();
     let chunk_languages = results.iter().map(|r| r.language.clone()).collect();
     let words = results.into_iter().flat_map(|r| r.words).collect();
     let Assembled { words, turns, cues } = assemble(words, &diarization.turns, &cfg.cue_rules);
@@ -307,6 +401,19 @@ pub fn run_cancellable(
     progress: &mut dyn FnMut(Progress),
     cancel: &AtomicBool,
 ) -> Result<Transcript> {
+    run_with(input, cfg, Resume::default(), &mut NoStore, progress, cancel)
+}
+
+/// [`run_cancellable`] that continues from `resume` and hands intermediate data to `store` (see
+/// [`transcribe_audio_with`]).
+pub fn run_with(
+    input: &Path,
+    cfg: &Config,
+    resume: Resume,
+    store: &mut dyn RunStore,
+    progress: &mut dyn FnMut(Progress),
+    cancel: &AtomicBool,
+) -> Result<Transcript> {
     let start = Instant::now();
     if !input.is_file() {
         return Err(crate::Error::InvalidInput(format!("input file not found: {}", input.display())));
@@ -342,7 +449,7 @@ pub fn run_cancellable(
         return Err(crate::Error::InvalidInput("input has no audio".into()));
     }
 
-    let mut tr = transcribe_audio(&audio, &mut diarizer, &mut asr, cfg, progress, cancel)?;
+    let mut tr = transcribe_audio_with(&audio, &mut diarizer, &mut asr, cfg, resume, store, progress, cancel)?;
     tr.meta.input = input.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     tr.meta.decoder = Some(decoder);
     tr.meta.timings.load_s = load_s;
@@ -423,6 +530,7 @@ mod tests {
                 estimated: true,
                 report: MergeReport::default(),
                 timings: vec![],
+                embeddings: vec![],
             })
         }
     }
@@ -438,9 +546,18 @@ mod tests {
         let mut asr = FakeAsr::default();
         let en = AsrOptions { language: Some("en".into()), prompt: None };
         let mut seen = Vec::new();
-        let out =
-            transcribe_chunks(&audio, &chunks, &mut asr, &en, &mut |r| seen.push(r.clone()), &AtomicBool::new(false))
-                .unwrap();
+        let out = transcribe_chunks(
+            &audio,
+            &chunks,
+            &mut asr,
+            &en,
+            &mut |r| {
+                seen.push(r.clone());
+                Ok(())
+            },
+            &AtomicBool::new(false),
+        )
+        .unwrap();
         assert_eq!(seen, out);
         assert_eq!(out[1].index, 1);
         assert_eq!(out[1].language.as_deref(), Some("en"));
@@ -451,7 +568,7 @@ mod tests {
         // Same model, another chunk, other options.
         let auto = AsrOptions { language: None, prompt: None };
         let out =
-            transcribe_chunks(&audio, &chunks[..1], &mut asr, &auto, &mut |_| {}, &AtomicBool::new(false)).unwrap();
+            transcribe_chunks(&audio, &chunks[..1], &mut asr, &auto, &mut |_| Ok(()), &AtomicBool::new(false)).unwrap();
         assert_eq!(out[0].language.as_deref(), Some("xx"));
         assert_eq!(asr.calls, [Some("en".into()), Some("en".into()), None]);
     }
@@ -472,6 +589,7 @@ mod tests {
             &mut |_| {
                 done += 1;
                 cancel.store(true, Ordering::Relaxed);
+                Ok(())
             },
             &cancel,
         );

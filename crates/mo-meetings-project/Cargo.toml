@@ -1,0 +1,18 @@
+[package]
+name = "mo-meetings-project"
+description = "Project files for mo-meetings: one SQLite file per meeting with its runs and intermediate data"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+repository.workspace = true
+
+[dependencies]
+mo-meetings-core.workspace = true
+rusqlite.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

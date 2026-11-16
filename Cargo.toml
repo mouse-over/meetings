@@ -1,18 +1,30 @@
 [workspace]
 resolver = "3"
-members = ["crates/mo-meetings-core", "crates/mo-meetings-cli", "crates/mo-meetings-mcp", "apps/desktop/src-tauri"]
+members = [
+  "crates/mo-meetings-core",
+  "crates/mo-meetings-project",
+  "crates/mo-meetings-cli",
+  "crates/mo-meetings-mcp",
+  "apps/desktop/src-tauri",
+]
 # Plain `cargo build` skips the desktop app (needs Rust 1.90 and, on Linux, webkit2gtk); `--workspace` includes it.
-default-members = ["crates/mo-meetings-core", "crates/mo-meetings-cli", "crates/mo-meetings-mcp"]
+default-members = [
+  "crates/mo-meetings-core",
+  "crates/mo-meetings-project",
+  "crates/mo-meetings-cli",
+  "crates/mo-meetings-mcp",
+]
 
 [workspace.package]
 version = "0.2.2"
 edition = "2024"
-rust-version = "1.88"
+rust-version = "1.89"
 publish = false
 repository = "https://github.com/mouse-over/meetings"
 
 [workspace.dependencies]
 mo-meetings-core = { path = "crates/mo-meetings-core", default-features = false }
+mo-meetings-project = { path = "crates/mo-meetings-project" }
 anyhow = "1.0.104"
 thiserror = "2.0.21"
 serde = { version = "1.0", features = ["derive"] }
@@ -29,6 +41,8 @@ clap = { version = "4.6.7", features = ["derive"] }
 indicatif = "0.18.6"
 rmcp = { version = "3.10.0", features = ["transport-io"] }
 schemars = "1.0"
+# SQLite compiled in (no system library), for the project files
+rusqlite = { version = "0.43.0", default-features = false, features = ["bundled"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 
 [profile.release]
