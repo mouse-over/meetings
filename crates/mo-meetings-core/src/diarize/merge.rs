@@ -29,7 +29,7 @@ impl Default for MergeParams {
     }
 }
 
-#[derive(Clone, Debug, Default, Serialize)]
+#[derive(Clone, Debug, Default, Serialize, serde::Deserialize)]
 pub struct MergeReport {
     /// Clusters returned by the clustering step.
     pub clusters_raw: usize,

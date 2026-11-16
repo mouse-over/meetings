@@ -16,7 +16,7 @@ pub struct DiarizeOptions {
     pub num_speakers: Option<usize>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Default, Serialize)]
 pub struct Diarization {
     /// Speaker turns, sorted by start, may overlap. Speaker ids are internal (not display numbers).
     pub turns: Vec<Turn>,
@@ -26,6 +26,10 @@ pub struct Diarization {
     pub report: merge::MergeReport,
     /// Backend-specific timings in seconds (e.g. clustering vs. embedding).
     pub timings: Vec<(String, f64)>,
+    /// Speaker embedding of each turn (parallel to `turns`), `None` where the turn was too short or the
+    /// backend does not compute them. Not in the JSON output.
+    #[serde(skip)]
+    pub embeddings: Vec<Option<Vec<f32>>>,
 }
 
 /// A diarization backend. Implementations get 16 kHz mono audio.

@@ -8,6 +8,7 @@ on top of the same library.
 
 ```text
 crates/mo-meetings-core   library: audio, diarization, ASR, chunking, assembly, VTT/JSON, models, pipeline
+crates/mo-meetings-project  project files: one SQLite file per meeting with its runs and intermediate data
 crates/mo-meetings-cli    binary `mo-meetings` (clap): transcribe, diarize, models list|download|path
 apps/desktop           (M1) Tauri v2 app using mo-meetings-core directly; src-tauri/ is the crate, Vite + TS front-end
 crates/mo-meetings-mcp    binary `mo-meetings-mcp`: MCP server over stdio (rmcp) exposing transcribe/diarize as tools
@@ -56,19 +57,24 @@ pub trait Asr { fn transcribe(&mut self, audio: &[f32], opts: &AsrOptions) -> Re
 // Steps, callable one by one
 pub fn pipeline::diarize(audio, &mut dyn Diarizer, num_speakers) -> Result<Diarization>;
 pub fn pipeline::speech_chunks(&[Turn], audio, &ChunkRules) -> Vec<Chunk>;
-pub fn pipeline::transcribe_chunks(audio, &[Chunk], &mut dyn Asr, &AsrOptions, sink, cancel: &AtomicBool) -> Result<Vec<ChunkResult>>;
+pub fn pipeline::transcribe_chunks(audio, &[Chunk], &mut dyn Asr, &AsrOptions, sink: FnMut(&ChunkResult) -> Result<()>, cancel: &AtomicBool) -> Result<Vec<ChunkResult>>;
 pub fn pipeline::assemble(Vec<Word>, &[Turn], &CueRules) -> Assembled;   // words with speakers, exclusive turns, cues
 
 // The steps chained
 pub fn pipeline::transcribe_audio(audio, &mut dyn Diarizer, &mut dyn Asr, &Config, progress, cancel) -> Result<Transcript>;
 pub fn pipeline::run(input, &Config, progress) -> Result<Transcript>;   // bundled backends + cached models
 pub fn pipeline::run_cancellable(input, &Config, progress, cancel) -> Result<Transcript>;
+// Continue from earlier work and hand intermediate data to a store (project files)
+pub fn pipeline::transcribe_audio_with(audio, …, &Config, Resume, &mut dyn RunStore, progress, cancel) -> Result<Transcript>;
+pub fn pipeline::run_with(input, &Config, Resume, &mut dyn RunStore, progress, cancel) -> Result<Transcript>;
 ```
 
 `transcribe_audio` is backend-agnostic; `run` wires sherpa-onnx + whisper.cpp and the model cache.
 `transcribe_chunks` takes any subset of chunks and per-call options, so one loaded model can re-transcribe some
 chunks differently; `sink` gets each chunk's words (with `Word.prob` and the language used or detected) as soon as
-the chunk is done. `cancel` is checked before every chunk and between the steps and ends the run with
+the chunk is done; an error from `sink` stops the run. `Resume` carries the diarization, the chunks and the
+finished chunks of an interrupted run; `RunStore` gets the diarization with the chunks and then every finished
+chunk. `Diarization.embeddings` holds the TitaNet embedding of each turn. `cancel` is checked before every chunk and between the steps and ends the run with
 `Error::Cancelled`. Errors carry the CLI exit code (`Error::exit_code`: 2 input, 3 model missing, 4 processing).
 
 ## Dependency choices (versions checked on crates.io, 2026-11-13)
@@ -109,6 +115,32 @@ NeMo TitaNet-Large ONNX (CC-BY-4.0, NVIDIA).
 `Profiles::suggest` matches the recording's file name against `match` globs. After whisper loads, `run` checks the
 prompt against whisper.cpp's prompt window (`n_text_ctx / 2 - 1` tokens) and sends `Progress::Warning` with the
 start that would be dropped.
+
+## Project files
+
+`mo-meetings-project` stores the work on one meeting in one SQLite file (`rusqlite` with bundled SQLite; document
+model, e.g. `meeting.mom`). `PRAGMA application_id` marks the file, `PRAGMA user_version` is the schema version and
+`MIGRATIONS` bring older files up to date; a newer schema is refused.
+
+- `project`: one row, the recording referenced by absolute path, path relative to the project, size, mtime and
+  SHA-256 of the first 4 MiB. `Project::recording` tries both paths and checks size and hash; `locate` accepts a
+  new path for the same file.
+- `run`: kind (`full` today; `asr`, `segment`, `assembly` reserved for #33, #34, #12), status (`running`, `done`,
+  `cancelled`, `failed`), `config_json` (`Config::settings_json`: model, language, prompt, speaker cap, chunk and
+  cue rules), profile, diarization summary, `meta_json` of the finished run.
+- `turn` (diarization turns with the f32 embedding blob, and the exclusive turns), `chunk` (status, language used
+  or detected), `word` (per chunk, probability, speaker after assembly), `cue`, `selection` (chunk → run whose text
+  is used; a finished full run selects all its chunks).
+
+`Project::transcribe` writes the diarization and chunks in one transaction and each chunk's words in its own as
+soon as the chunk is done. The latest unfinished `full` run with the same `config_json` is resumed: its diarization
+and finished chunks go into `Resume`, only the other chunks are transcribed. whisper.cpp seeds the sampling RNG of
+its first decoder only when a state is created, so `WhisperAsr` creates a state per chunk (under 0.1 s, 2–4 % of the ASR time); a chunk
+then gives the same words in a full run, a resumed run or a re-run, and a resumed transcript equals an
+uninterrupted one.
+
+Not yet: the desktop app (New / Open / Recent), the MCP `project` parameter, the cache of decoded audio and the
+profile snapshot.
 
 ## MCP server
 
