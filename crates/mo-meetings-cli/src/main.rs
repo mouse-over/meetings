@@ -5,7 +5,8 @@
 use clap::{Parser, Subcommand, ValueEnum};
 use indicatif::{ProgressBar, ProgressStyle};
 use mo_meetings_core::pipeline::{self, Config, Progress, Stage};
-use mo_meetings_core::{Error, models, vtt};
+use mo_meetings_core::profile::{self, Profiles};
+use mo_meetings_core::{Error, asr, models, vtt};
 use std::io::IsTerminal;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -44,6 +45,25 @@ enum Command {
         #[command(subcommand)]
         command: ModelsCommand,
     },
+    /// List and inspect settings profiles
+    Profiles {
+        #[command(subcommand)]
+        command: ProfilesCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum ProfilesCommand {
+    /// List the profiles, where each comes from, and which match a recording
+    List {
+        /// Mark the profiles whose `match` patterns fit this recording's file name
+        #[arg(long = "for", value_name = "RECORDING")]
+        recording: Option<PathBuf>,
+    },
+    /// Show a profile with everything it extends merged in
+    Show { name: String },
+    /// Print the profile directories (later wins on the same name)
+    Path,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -73,9 +93,12 @@ struct TranscribeArgs {
     /// Also write metadata JSON next to the VTT
     #[arg(long)]
     json: bool,
-    /// Language code, or `auto`
-    #[arg(long, default_value = "cs")]
-    language: String,
+    /// Settings profile (see `mo-meetings profiles list`); the options below override it
+    #[arg(long, short = 'p')]
+    profile: Option<String>,
+    /// Language code, or `auto` [default: cs]
+    #[arg(long)]
+    language: Option<String>,
     /// Glossary / context prompt given to whisper for every chunk
     #[arg(long, conflicts_with = "prompt_file")]
     prompt: Option<String>,
@@ -85,9 +108,9 @@ struct TranscribeArgs {
     /// Hint: at most this many speakers (by default the number is estimated)
     #[arg(long, value_parser = clap::value_parser!(u32).range(1..=64))]
     num_speakers: Option<u32>,
-    /// Whisper model
-    #[arg(long, value_enum, default_value_t = ModelChoice::Turbo)]
-    model: ModelChoice,
+    /// Whisper model [default: turbo]
+    #[arg(long, value_enum)]
+    model: Option<ModelChoice>,
     /// CPU threads (diarization; more than the performance cores is slower)
     #[arg(long, default_value_t = 4, value_parser = clap::value_parser!(u32).range(1..=64))]
     threads: u32,
@@ -121,6 +144,7 @@ fn main() -> ExitCode {
         Command::Transcribe(args) => transcribe(args),
         Command::Diarize { input, output, num_speakers, threads } => diarize(&input, output, num_speakers, threads),
         Command::Models { command } => models_cmd(command),
+        Command::Profiles { command } => profiles_cmd(command),
     };
     match result {
         Ok(()) => ExitCode::SUCCESS,
@@ -148,15 +172,32 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
     if output == args.input {
         return Err(invalid("output would overwrite the input"));
     }
-    let language = match args.language.trim() {
-        "auto" => None,
-        l if l.len() == 2 && l.chars().all(|c| c.is_ascii_lowercase()) => Some(l.to_string()),
-        l => return Err(invalid(format!("invalid language `{l}` (use a 2-letter code or `auto`)"))),
-    };
-    let mut cfg = Config { asr_model: args.model.id().into(), threads: args.threads as usize, ..Default::default() };
-    cfg.asr.language = language;
-    cfg.asr.prompt = prompt.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
-    cfg.num_speakers = args.num_speakers.map(|n| n as usize);
+    let mut cfg = Config { threads: args.threads as usize, ..Default::default() };
+    match &args.profile {
+        Some(name) => {
+            let profiles = Profiles::load()?;
+            warn_all(&profiles.warnings);
+            let resolved = profiles.resolve(name)?;
+            resolved.apply(&mut cfg)?;
+            eprintln!(
+                "profile {name} ({})",
+                resolved.sources.iter().map(|p| p.display().to_string()).collect::<Vec<_>>().join(" → ")
+            );
+        }
+        None => suggest_profile(&args.input),
+    }
+    if let Some(l) = &args.language {
+        cfg.asr.language = asr::parse_language(l)?;
+    }
+    if let Some(p) = prompt {
+        cfg.asr.prompt = Some(p.trim().to_string()).filter(|p| !p.is_empty());
+    }
+    if let Some(m) = args.model {
+        cfg.asr_model = m.id().into();
+    }
+    if let Some(n) = args.num_speakers {
+        cfg.num_speakers = Some(n as usize);
+    }
 
     let mut reporter = Reporter::new();
     let tr = pipeline::run(&args.input, &cfg, &mut |p| reporter.on(p))?;
@@ -178,6 +219,79 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
     }
     if let Some(path) = &args.dump {
         write_dump(path, &tr)?;
+    }
+    Ok(())
+}
+
+fn warn_all(warnings: &[String]) {
+    for w in warnings {
+        eprintln!("warning: {w}");
+    }
+}
+
+/// Without `--profile`, points to profiles whose `match` patterns fit the recording. Problems with the
+/// profile files are not reported here: the run does not use them.
+fn suggest_profile(input: &Path) {
+    let Ok(profiles) = Profiles::load() else { return };
+    let names = profiles.suggest(input);
+    if !names.is_empty() {
+        eprintln!("hint: profile {} matches this recording (use --profile <name>)", names.join(", "));
+    }
+}
+
+fn profiles_cmd(cmd: ProfilesCommand) -> anyhow::Result<()> {
+    match cmd {
+        ProfilesCommand::Path => {
+            println!("config: {}", profile::config_dir().join("config.toml").display());
+            for d in profile::profile_dirs(&profile::config_dir())? {
+                println!("{}", d.display());
+            }
+        }
+        ProfilesCommand::List { recording } => {
+            let profiles = Profiles::load()?;
+            warn_all(&profiles.warnings);
+            let matching = recording.as_deref().map(|r| profiles.suggest(r)).unwrap_or_default();
+            if profiles.list().next().is_none() {
+                let dirs: Vec<String> = profiles.dirs.iter().map(|d| d.display().to_string()).collect();
+                eprintln!("no profiles in {}", dirs.join(", "));
+            }
+            for p in profiles.list() {
+                let mark = if matching.contains(&p.name.as_str()) { "*" } else { " " };
+                let extends = p.extends.as_deref().map(|e| format!(" (extends {e})")).unwrap_or_default();
+                println!("{mark} {:<20} {}{extends}", p.name, p.description.as_deref().unwrap_or(""));
+                println!("    {}", p.path.display());
+                for s in &p.shadowed {
+                    println!("    overrides {}", s.display());
+                }
+            }
+            if recording.is_some() {
+                eprintln!("* = matches the recording's file name");
+            }
+        }
+        ProfilesCommand::Show { name } => {
+            let profiles = Profiles::load()?;
+            warn_all(&profiles.warnings);
+            let r = profiles.resolve(&name)?;
+            let mut out = serde_json::to_value(&r)?;
+            // Show the values a run would use, not only the ones the profile sets.
+            let mut cfg = Config::default();
+            r.apply(&mut cfg)?;
+            if let serde_json::Value::Object(m) = &mut out {
+                m.insert(
+                    "effective".into(),
+                    serde_json::json!({
+                        "language": cfg.asr.language.as_deref().unwrap_or("auto"),
+                        "model": cfg.asr_model,
+                        "num_speakers": cfg.num_speakers,
+                        "chunks": {"max_len": cfg.chunk_rules.max_len, "max_gap": cfg.chunk_rules.max_gap,
+                                   "pad": cfg.chunk_rules.pad, "search": cfg.chunk_rules.search},
+                        "cues": {"max_pause": cfg.cue_rules.max_pause, "max_duration": cfg.cue_rules.max_duration,
+                                 "sentence_min_duration": cfg.cue_rules.sentence_min_duration},
+                    }),
+                );
+            }
+            println!("{}", serde_json::to_string_pretty(&out)?);
+        }
     }
     Ok(())
 }
@@ -277,6 +391,10 @@ impl Reporter {
                 }
                 eprintln!("{:?} done in {:.1} s", stage, secs);
             }
+            Progress::Warning(w) => match &self.bar {
+                Some(bar) => bar.suspend(|| eprintln!("warning: {w}")),
+                None => eprintln!("warning: {w}"),
+            },
         }
     }
 

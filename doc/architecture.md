@@ -100,13 +100,24 @@ Downloaded by `mo-meetings models download` into the user cache (`dirs::cache_di
 `NOTICE`: whisper large-v3-turbo (default) / large-v3 (MIT), pyannote segmentation-3.0 ONNX (MIT, © CNRS),
 NeMo TitaNet-Large ONNX (CC-BY-4.0, NVIDIA).
 
+## Settings profiles
+
+`profile.rs` loads `<name>.toml` presets from `<config>/profiles` and the `profile_dirs` of `<config>/config.toml`
+(`dirs::config_dir()/mo-meetings`, override `MO_MEETINGS_CONFIG_DIR`); a later directory wins on the same name.
+`Profiles::resolve` follows `extends` (cycle check), overrides scalars, merges glossaries and reads `prompt_file`;
+`Resolved::apply` writes the result into a `pipeline::Config`, and callers apply explicit options after it.
+`Profiles::suggest` matches the recording's file name against `match` globs. After whisper loads, `run` checks the
+prompt against whisper.cpp's prompt window (`n_text_ctx / 2 - 1` tokens) and sends `Progress::Warning` with the
+start that would be dropped.
+
 ## MCP server
 
 `mo-meetings-mcp` speaks MCP over stdio (stdout is the protocol, logs go to stderr). Tools:
 
-- `transcribe(path, language?, prompt?, num_speakers?, output?)`: runs `pipeline::run` on a blocking thread,
+- `transcribe(path, profile?, language?, prompt?, num_speakers?, output?)`: runs `pipeline::run` on a blocking thread,
   writes the VTT and the JSON metadata (default next to the input) and returns their paths with duration, speakers
-  and cue count (also as structured content).
+  and cue count (also as structured content), plus `Progress::Warning` messages as `warnings`.
+- `profiles(path?)`: the settings profiles, their files, and which match the recording's file name.
 - `diarize(path, num_speakers?, output?)`: writes the same JSON as `mo-meetings diarize` (default
   `<input>.turns.json`) and returns its path.
 

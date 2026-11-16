@@ -79,6 +79,15 @@ pub fn find(id: &str) -> Option<&'static ModelInfo> {
     MODELS.iter().find(|m| m.id == id)
 }
 
+/// Registry id of a whisper model given as `turbo`, `large` or a registry id.
+pub fn asr_model_id(name: &str) -> Option<&'static str> {
+    match name.trim() {
+        "turbo" => Some("whisper-large-v3-turbo"),
+        "large" => Some("whisper-large-v3"),
+        id => MODELS.iter().find(|m| m.id == id && m.kind == Kind::Asr).map(|m| m.id),
+    }
+}
+
 /// Model directory: `$MO_MEETINGS_MODELS_DIR`, else `<user cache>/mo-meetings/models`
 /// (`~/Library/Caches/mo-meetings/models` on macOS, `~/.cache/mo-meetings/models` on Linux).
 pub fn models_dir() -> PathBuf {

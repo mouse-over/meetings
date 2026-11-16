@@ -22,6 +22,7 @@ whisper-rs.workspace = true
 dirs.workspace = true
 sha2.workspace = true
 ureq.workspace = true
+toml.workspace = true
 
 # macOS: sherpa-onnx as shared libraries so that build.rs can put Microsoft's onnxruntime in front of the one
 # bundled in the sherpa-onnx release (same version, but that build is ~2.3x slower on Apple Silicon).

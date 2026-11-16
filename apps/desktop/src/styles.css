@@ -72,6 +72,15 @@ form {
   font-weight: 600;
 }
 
+#stages [data-state="warning"] {
+  display: block;
+  margin-left: -1.25rem;
+  padding: 0.25rem 0.5rem;
+  border-radius: 0.25rem;
+  background: color-mix(in srgb, #e90 18%, transparent);
+  word-break: break-word;
+}
+
 #chunks {
   width: 100%;
 }
@@ -85,7 +94,7 @@ form {
 }
 
 #cues {
-  list-style: none;
+  display: block;
   padding: 0;
   display: grid;
   gap: 0.5rem;

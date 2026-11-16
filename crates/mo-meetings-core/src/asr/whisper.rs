@@ -29,7 +29,37 @@ pub struct WhisperAsr {
     eot: i32,
     state: WhisperState,
     // keep the context alive as long as the state
-    _ctx: WhisperContext,
+    ctx: WhisperContext,
+}
+
+/// How a prompt fits whisper's prompt window.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PromptFit {
+    pub tokens: usize,
+    /// Tokens whisper keeps: half of the text context minus the previous-text marker (223 for the large models).
+    pub budget: usize,
+    /// The start of the prompt whisper.cpp drops (it keeps the last `budget` tokens).
+    pub dropped: Option<String>,
+}
+
+impl PromptFit {
+    /// A message for the user when part of the prompt is dropped.
+    pub fn warning(&self) -> Option<String> {
+        let dropped = self.dropped.as_deref()?.trim();
+        let chars: Vec<char> = dropped.chars().collect();
+        // Long glossaries would flood the terminal: the start and the cut point are what matter.
+        let shown = if chars.len() > 300 {
+            let head: String = chars[..120].iter().collect();
+            let tail: String = chars[chars.len() - 120..].iter().collect();
+            format!("{head} … {tail}")
+        } else {
+            dropped.to_string()
+        };
+        Some(format!(
+            "the prompt has {} tokens, whisper keeps only the last {}; this start is ignored: \"{shown}\"",
+            self.tokens, self.budget
+        ))
+    }
 }
 
 impl WhisperAsr {
@@ -48,7 +78,26 @@ impl WhisperAsr {
             .map_err(|e| Error::Asr(format!("cannot load {}: {e}", model.display())))?;
         let state = ctx.create_state().map_err(|e| Error::Asr(format!("cannot create whisper state: {e}")))?;
         let eot = ctx.token_eot();
-        Ok(Self { name: name.into(), params, eot, state, _ctx: ctx })
+        Ok(Self { name: name.into(), params, eot, state, ctx })
+    }
+
+    /// Counts the prompt's tokens as whisper.cpp does for `initial_prompt` and shows what it drops.
+    pub fn prompt_fit(&self, prompt: &str) -> Result<PromptFit> {
+        // whisper.cpp: `max_prompt_ctx - 1` tokens after the `<|startofprev|>` marker.
+        let budget = (self.ctx.n_text_ctx() / 2 - 1).max(0) as usize;
+        // A BPE token covers at least one byte; the room avoids whisper.cpp's "too many tokens" error.
+        let toks = self
+            .ctx
+            .tokenize(prompt, prompt.len() + 16)
+            .map_err(|e| Error::Asr(format!("cannot tokenize the prompt: {e}")))?;
+        let dropped = (toks.len() > budget).then(|| {
+            let bytes: Vec<u8> = toks[..toks.len() - budget]
+                .iter()
+                .flat_map(|&t| self.ctx.token_to_bytes(t).map(<[u8]>::to_vec).unwrap_or_default())
+                .collect();
+            String::from_utf8_lossy(&bytes).into_owned()
+        });
+        Ok(PromptFit { tokens: toks.len(), budget, dropped })
     }
 }
 
@@ -191,6 +240,16 @@ mod tests {
         let w = words_from_tokens(&toks, 1.0);
         assert!((w[0].prob.unwrap() - 0.6).abs() < 1e-6, "{w:?}");
         assert!((w[1].prob.unwrap() - 0.8).abs() < 1e-6, "{w:?}");
+    }
+
+    #[test]
+    fn prompt_warning_only_when_something_is_dropped() {
+        let fit = PromptFit { tokens: 100, budget: 224, dropped: None };
+        assert_eq!(fit.warning(), None);
+        let long = "x".repeat(1000) + " END";
+        let w = PromptFit { tokens: 500, budget: 224, dropped: Some(long) }.warning().unwrap();
+        assert!(w.contains("500 tokens") && w.contains("last 224") && w.ends_with("x END\""), "{w}");
+        assert!(w.len() < 400, "{w}");
     }
 
     #[test]
