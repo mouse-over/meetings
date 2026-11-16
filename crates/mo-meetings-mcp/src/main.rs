@@ -6,22 +6,32 @@
 use mo_meetings_core::pipeline::{self, Config, Progress, Stage};
 use mo_meetings_core::profile::Profiles;
 use mo_meetings_core::{Error, asr, vtt};
+use mo_meetings_project::{Error as ProjectError, Project};
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{
     Implementation, ProgressNotificationParam, ProgressToken, RequestMetaObject, ServerCapabilities, ServerConfig,
 };
+use rmcp::service::RequestContext;
 use rmcp::{Json, Peer, RoleServer, ServerHandler, ServiceExt, tool, tool_handler, tool_router};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use tokio::sync::mpsc;
 
 #[derive(Deserialize, JsonSchema)]
 struct TranscribeParams {
     /// Recording to transcribe (mp4, m4a, wav, mp3, …). Prefer an absolute path; relative paths are resolved
-    /// against the server's working directory.
-    path: String,
+    /// against the server's working directory. Optional with an existing `project` (give it when the recording
+    /// moved).
+    #[serde(default)]
+    path: Option<String>,
+    /// Project file (e.g. `meeting.mom`, SQLite): created for the recording when missing. Stores the run, and a
+    /// run that was interrupted or cancelled with the same settings continues from the next chunk.
+    #[serde(default)]
+    project: Option<String>,
     /// Settings profile (see the `profiles` tool). The other parameters override its values.
     #[serde(default)]
     profile: Option<String>,
@@ -36,7 +46,7 @@ struct TranscribeParams {
     #[serde(default)]
     #[schemars(range(min = 1, max = 64))]
     num_speakers: Option<u32>,
-    /// Output VTT path. Default: the input with a `.vtt` extension. The JSON metadata goes next to it (`.json`).
+    /// Output VTT path. Default: the recording with a `.vtt` extension. The JSON metadata goes next to it (`.json`).
     #[serde(default)]
     output: Option<String>,
 }
@@ -54,6 +64,15 @@ struct TranscribeResult {
     /// The settings profile used.
     #[serde(skip_serializing_if = "Option::is_none")]
     profile: Option<String>,
+    /// The project file the run was saved in.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    project_path: Option<String>,
+    /// The run's id in the project.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    run_id: Option<i64>,
+    /// Chunks taken over from an interrupted run of the project (0 for a new run).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resumed_chunks: Option<usize>,
     /// Problems that did not stop the run (e.g. a prompt longer than whisper keeps).
     #[serde(skip_serializing_if = "Vec::is_empty")]
     warnings: Vec<String>,
@@ -123,23 +142,17 @@ impl MeetingsServer {
     /// Transcribe a meeting recording locally (diarization + whisper) into WebVTT with `Speaker N` labels.
     #[tool(description = "Transcribe a meeting recording on this machine into WebVTT with speaker labels \
                        (`<v Speaker N>`) plus JSON metadata. Writes both files and returns their paths. Takes \
-                       minutes for long recordings; progress is reported.")]
+                       minutes for long recordings; progress is reported. With `project`, the run is saved in \
+                       that project file and an interrupted or cancelled run continues where it stopped.")]
     async fn transcribe(
         &self,
         Parameters(p): Parameters<TranscribeParams>,
-        meta: RequestMetaObject,
-        peer: Peer<RoleServer>,
+        ctx: RequestContext<RoleServer>,
     ) -> Result<Json<TranscribeResult>, String> {
-        let input = absolute(&p.path)?;
-        let output = match &p.output {
-            Some(o) => absolute(o)?,
-            None => input.with_extension("vtt"),
-        };
-        let json_path = output.with_extension("json");
-        if output == input || json_path == input {
-            return Err(message(Error::InvalidInput("output would overwrite the input".into())));
-        }
-        if output.extension().is_some_and(|e| e.eq_ignore_ascii_case("json")) {
+        let input = p.path.as_deref().map(absolute).transpose()?;
+        let project = p.project.as_deref().map(absolute).transpose()?;
+        let output = p.output.as_deref().map(absolute).transpose()?;
+        if output.as_ref().is_some_and(|o| o.extension().is_some_and(|e| e.eq_ignore_ascii_case("json"))) {
             return Err(message(Error::InvalidInput("output must not have a .json extension".into())));
         }
         let mut cfg = Config::default();
@@ -159,21 +172,59 @@ impl MeetingsServer {
             cfg.num_speakers = Some(n as usize);
         }
 
-        let reporter = ProgressForwarder::spawn(meta.get_progress_token(), peer, progress_point);
+        // A cancelled request stops the run after the chunk in progress; in a project it stays resumable.
+        let cancel = Arc::new(AtomicBool::new(false));
+        let watcher = {
+            let (ct, cancel) = (ctx.ct.clone(), cancel.clone());
+            tokio::spawn(async move {
+                ct.cancelled().await;
+                cancel.store(true, Ordering::Relaxed);
+            })
+        };
+        let reporter = ProgressForwarder::spawn(ctx.meta.get_progress_token(), ctx.peer, progress_point);
         let tx = reporter.sender();
         let result = tokio::task::spawn_blocking(move || {
-            let tr = pipeline::run(&input, &cfg, &mut |pr| match pr {
+            let mut on_progress = |pr| match pr {
                 Progress::Warning(w) => warnings.push(w),
                 pr => {
                     if let Some(tx) = &tx {
                         let _ = tx.send(pr);
                     }
                 }
-            })?;
-            std::fs::write(&output, vtt::render(&tr.cues))?;
-            let meta = serde_json::to_string_pretty(&tr.meta).map_err(|e| Error::InvalidInput(e.to_string()))?;
-            std::fs::write(&json_path, meta + "\n")?;
-            Ok::<_, Error>(TranscribeResult {
+            };
+            let mut project = match &project {
+                Some(path) => Some(Project::open_or_create(path, input.as_deref()).map_err(project_message)?.0),
+                None => None,
+            };
+            let input = match (&project, input) {
+                (Some(p), _) => p.recording().map_err(project_message)?,
+                (None, Some(input)) => input,
+                (None, None) => {
+                    return Err(message(Error::InvalidInput("give the recording (`path`) or a `project`".into())));
+                }
+            };
+            let output = output.unwrap_or_else(|| input.with_extension("vtt"));
+            let json_path = output.with_extension("json");
+            if output == input || json_path == input {
+                return Err(message(Error::InvalidInput("output would overwrite the input".into())));
+            }
+            let (tr, saved) = match &mut project {
+                Some(p) => {
+                    let out = p.transcribe(&cfg, &mut on_progress, &cancel).map_err(project_message)?;
+                    let saved = (p.path().display().to_string(), out.run_id, out.resumed_chunks);
+                    (out.transcript, Some(saved))
+                }
+                None => (pipeline::run_cancellable(&input, &cfg, &mut on_progress, &cancel).map_err(message)?, None),
+            };
+            let write = |path: &Path, text: String| std::fs::write(path, text).map_err(|e| message(Error::Io(e)));
+            write(&output, vtt::render(&tr.cues))?;
+            let meta = serde_json::to_string_pretty(&tr.meta).map_err(|e| e.to_string())?;
+            write(&json_path, meta + "\n")?;
+            let (project_path, run_id, resumed_chunks) = match saved {
+                Some((path, id, resumed)) => (Some(path), Some(id), Some(resumed)),
+                None => (None, None, None),
+            };
+            Ok(TranscribeResult {
                 vtt_path: output.display().to_string(),
                 json_path: json_path.display().to_string(),
                 audio_duration_s: tr.meta.audio_duration_s,
@@ -181,12 +232,16 @@ impl MeetingsServer {
                 cues: tr.meta.cues,
                 processing_s: tr.meta.timings.total_s,
                 profile: tr.meta.profile,
+                project_path,
+                run_id,
+                resumed_chunks,
                 warnings,
             })
         })
         .await;
+        watcher.abort();
         reporter.finish().await;
-        Ok(Json(result.map_err(|e| format!("transcription task failed: {e}"))?.map_err(message)?))
+        Ok(Json(result.map_err(|e| format!("transcription task failed: {e}"))??))
     }
 
     /// Settings profiles available to `transcribe`.
@@ -272,7 +327,8 @@ impl ServerHandler for MeetingsServer {
             )
             .with_instructions(
                 "Local meeting transcription with speaker diarization. `transcribe` writes a WebVTT (+ JSON \
-                 metadata) next to the recording and returns the paths; read the VTT for the text. `profiles` \
+                 metadata) next to the recording and returns the paths; read the VTT for the text. Give `project` \
+                 (a `.mom` file) to keep the run and resume it after an interruption. `profiles` \
                  lists settings presets; pass one as `profile` when it matches the recording. Runs take \
                  roughly 5-15 % of the recording length on Apple Silicon. Models must be downloaded once with \
                  `mo-meetings models download`.",
@@ -283,6 +339,16 @@ impl ServerHandler for MeetingsServer {
 /// Error text for the tool result. Missing models already say `run mo-meetings models download`.
 fn message(e: Error) -> String {
     e.to_string()
+}
+
+/// Error text for a project error; a recording that moved is given as `path`, not on the command line.
+fn project_message(e: ProjectError) -> String {
+    match e {
+        ProjectError::RecordingMissing(p) => {
+            format!("recording not found at {} (moved? give its new path as `path` with the project)", p.display())
+        }
+        e => e.to_string(),
+    }
 }
 
 fn absolute(p: &str) -> Result<PathBuf, String> {

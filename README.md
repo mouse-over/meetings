@@ -112,6 +112,11 @@ to MCP clients over stdio:
 - `transcribe(path, profile?, language?, prompt?, num_speakers?, output?)` writes `<input>.vtt` and `<input>.json`
   (or next to `output`) and returns their paths, the audio duration, the number of speakers and cues, plus any
   warnings (e.g. a prompt that is too long). `language` defaults to the profile's, else `cs`; use `auto` to detect.
+  With `project` (e.g. `meeting.mom`) the run is saved in that project file as with the CLI's `--project`:
+  the project is created for `path` when missing, `path` can be left out once it exists (or gives the recording's
+  new place when it moved), and the result adds `project_path`, `run_id` and `resumed_chunks`. A cancelled tool
+  call stops after the chunk in progress; calling `transcribe` again with the same project and settings continues
+  from there.
 - `profiles(path?)` lists the settings profiles and, given a recording, which ones match its file name.
 - `diarize(path, num_speakers?, output?)` writes speaker turns to `<input>.turns.json` and returns the path.
 
