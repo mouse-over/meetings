@@ -37,6 +37,8 @@ pub enum Progress {
         audio_total: f64,
     },
     Finished(Stage, f64),
+    /// Something the user should know about the run that does not stop it (e.g. a prompt that is too long).
+    Warning(String),
 }
 
 #[derive(Clone, Debug)]
@@ -49,6 +51,8 @@ pub struct Config {
     pub threads: usize,
     pub cue_rules: CueRules,
     pub chunk_rules: ChunkRules,
+    /// Name of the settings profile the options came from (for metadata).
+    pub profile: Option<String>,
 }
 
 impl Default for Config {
@@ -60,6 +64,7 @@ impl Default for Config {
             threads: 4,
             cue_rules: CueRules::default(),
             chunk_rules: ChunkRules::default(),
+            profile: None,
         }
     }
 }
@@ -82,6 +87,9 @@ pub struct Metadata {
     pub audio_duration_s: f64,
     pub decoder: Option<Decoder>,
     pub model: String,
+    /// Settings profile the options came from.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub profile: Option<String>,
     pub language: Option<String>,
     pub prompt: bool,
     pub num_speakers: usize,
@@ -243,6 +251,7 @@ pub fn transcribe_audio(
         audio_duration_s: audio.len() as f64 / SAMPLE_RATE as f64,
         decoder: None,
         model: asr.model_name(),
+        profile: cfg.profile.clone(),
         language: cfg.asr.language.clone(),
         prompt: cfg.asr.prompt.as_deref().is_some_and(|p| !p.trim().is_empty()),
         num_speakers: speakers_in_output,
@@ -318,6 +327,11 @@ pub fn run_cancellable(
     let mut asr = WhisperAsr::new(&asr_path, cfg.asr_model.clone(), wp)?;
     let load_s = t.elapsed().as_secs_f64();
     progress(Progress::Finished(Stage::Load, load_s));
+    if let Some(p) = &cfg.asr.prompt
+        && let Some(w) = asr.prompt_fit(p)?.warning()
+    {
+        progress(Progress::Warning(w));
+    }
 
     progress(Progress::Started(Stage::Decode));
     let t = Instant::now();

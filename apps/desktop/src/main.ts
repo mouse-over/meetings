@@ -9,7 +9,8 @@ type Stage = "load" | "decode" | "diarize" | "transcribe" | "assemble";
 type ProgressEvent =
   | { kind: "started"; stage: Stage }
   | { kind: "chunk"; done: number; total: number; audioDone: number; audioTotal: number }
-  | { kind: "finished"; stage: Stage; seconds: number };
+  | { kind: "finished"; stage: Stage; seconds: number }
+  | { kind: "warning"; message: string };
 
 interface Cue {
   start: number;
@@ -247,6 +248,13 @@ function resetProgress() {
 }
 
 function onProgress(p: ProgressEvent) {
+  if (p.kind === "warning") {
+    const li = document.createElement("li");
+    li.dataset.state = "warning";
+    li.textContent = `Warning: ${p.message}`;
+    stagesList.append(li);
+    return;
+  }
   if (p.kind === "chunk") {
     chunkBar.value = p.audioTotal > 0 ? p.audioDone / p.audioTotal : 1;
     chunkText.textContent = `Chunk ${p.done} of ${p.total} · ${clock(p.audioDone)} of ${clock(p.audioTotal)} of speech`;

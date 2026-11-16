@@ -2,7 +2,7 @@
 
 pub mod whisper;
 
-use crate::{Result, Word};
+use crate::{Error, Result, Word};
 
 #[derive(Clone, Debug)]
 pub struct AsrOptions {
@@ -15,6 +15,15 @@ pub struct AsrOptions {
 impl Default for AsrOptions {
     fn default() -> Self {
         Self { language: Some("cs".into()), prompt: None }
+    }
+}
+
+/// Parses a language option: a 2-letter ISO 639-1 code, or `auto` (= `None`, detect per chunk).
+pub fn parse_language(l: &str) -> Result<Option<String>> {
+    match l.trim() {
+        "auto" => Ok(None),
+        l if l.len() == 2 && l.chars().all(|c| c.is_ascii_lowercase()) => Ok(Some(l.to_string())),
+        l => Err(Error::InvalidInput(format!("invalid language `{l}` (use a 2-letter code or `auto`)"))),
     }
 }
 

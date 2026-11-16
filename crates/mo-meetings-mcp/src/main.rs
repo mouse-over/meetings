@@ -4,7 +4,8 @@
 //! notifications when the client sends a progress token.
 
 use mo_meetings_core::pipeline::{self, Config, Progress, Stage};
-use mo_meetings_core::{Error, vtt};
+use mo_meetings_core::profile::Profiles;
+use mo_meetings_core::{Error, asr, vtt};
 use rmcp::handler::server::{router::tool::ToolRouter, wrapper::Parameters};
 use rmcp::model::{
     Implementation, ProgressNotificationParam, ProgressToken, RequestMetaObject, ServerCapabilities, ServerConfig,
@@ -21,10 +22,14 @@ struct TranscribeParams {
     /// Recording to transcribe (mp4, m4a, wav, mp3, …). Prefer an absolute path; relative paths are resolved
     /// against the server's working directory.
     path: String,
-    /// ISO 639-1 language code (e.g. `cs`, `en`) or `auto`. Default `cs`.
+    /// Settings profile (see the `profiles` tool). The other parameters override its values.
+    #[serde(default)]
+    profile: Option<String>,
+    /// ISO 639-1 language code (e.g. `cs`, `en`) or `auto`. Default: the profile's, else `cs`.
     #[serde(default)]
     language: Option<String>,
-    /// Glossary / context prompt (domain terms, names) given to whisper with every chunk.
+    /// Glossary / context prompt (domain terms, names) given to whisper with every chunk. Replaces the
+    /// profile's prompt and glossary.
     #[serde(default)]
     prompt: Option<String>,
     /// At most this many speakers (by default the number is estimated).
@@ -46,6 +51,39 @@ struct TranscribeResult {
     num_speakers: usize,
     cues: usize,
     processing_s: f64,
+    /// The settings profile used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    profile: Option<String>,
+    /// Problems that did not stop the run (e.g. a prompt longer than whisper keeps).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
+}
+
+#[derive(Deserialize, JsonSchema)]
+struct ProfilesParams {
+    /// A recording: profiles whose file name patterns match it are marked `matches`.
+    #[serde(default)]
+    path: Option<String>,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ProfileEntry {
+    name: String,
+    description: Option<String>,
+    extends: Option<String>,
+    /// Profile file.
+    source: String,
+    /// The recording's file name matches the profile's patterns.
+    matches: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
+struct ProfilesResult {
+    profiles: Vec<ProfileEntry>,
+    /// Directories searched, later wins on the same name.
+    dirs: Vec<String>,
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    warnings: Vec<String>,
 }
 
 #[derive(Deserialize, JsonSchema)]
@@ -105,16 +143,31 @@ impl MeetingsServer {
             return Err(message(Error::InvalidInput("output must not have a .json extension".into())));
         }
         let mut cfg = Config::default();
-        cfg.asr.language = parse_language(p.language.as_deref())?;
-        cfg.asr.prompt = p.prompt.map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
-        cfg.num_speakers = p.num_speakers.map(|n| n as usize);
+        let mut warnings = Vec::new();
+        if let Some(name) = p.profile.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
+            let profiles = Profiles::load().map_err(message)?;
+            warnings.extend(profiles.warnings.iter().cloned());
+            profiles.resolve(name).and_then(|r| r.apply(&mut cfg)).map_err(message)?;
+        }
+        if let Some(l) = p.language.as_deref().map(str::trim).filter(|l| !l.is_empty()) {
+            cfg.asr.language = asr::parse_language(l).map_err(message)?;
+        }
+        if let Some(prompt) = p.prompt {
+            cfg.asr.prompt = Some(prompt.trim().to_string()).filter(|s| !s.is_empty());
+        }
+        if let Some(n) = p.num_speakers {
+            cfg.num_speakers = Some(n as usize);
+        }
 
         let reporter = ProgressForwarder::spawn(meta.get_progress_token(), peer, progress_point);
         let tx = reporter.sender();
         let result = tokio::task::spawn_blocking(move || {
-            let tr = pipeline::run(&input, &cfg, &mut |pr| {
-                if let Some(tx) = &tx {
-                    let _ = tx.send(pr);
+            let tr = pipeline::run(&input, &cfg, &mut |pr| match pr {
+                Progress::Warning(w) => warnings.push(w),
+                pr => {
+                    if let Some(tx) = &tx {
+                        let _ = tx.send(pr);
+                    }
                 }
             })?;
             std::fs::write(&output, vtt::render(&tr.cues))?;
@@ -127,11 +180,39 @@ impl MeetingsServer {
                 num_speakers: tr.meta.num_speakers,
                 cues: tr.meta.cues,
                 processing_s: tr.meta.timings.total_s,
+                profile: tr.meta.profile,
+                warnings,
             })
         })
         .await;
         reporter.finish().await;
         Ok(Json(result.map_err(|e| format!("transcription task failed: {e}"))?.map_err(message)?))
+    }
+
+    /// Settings profiles available to `transcribe`.
+    #[tool(description = "List the settings profiles (named presets of language, prompt/glossary, model, number \
+                       of speakers) that `transcribe` accepts as `profile`. Give `path` to see which profiles \
+                       match a recording's file name.")]
+    async fn profiles(&self, Parameters(p): Parameters<ProfilesParams>) -> Result<Json<ProfilesResult>, String> {
+        let profiles = Profiles::load().map_err(message)?;
+        let matching = match &p.path {
+            Some(path) => profiles.suggest(&absolute(path)?).into_iter().map(str::to_string).collect(),
+            None => Vec::new(),
+        };
+        Ok(Json(ProfilesResult {
+            profiles: profiles
+                .list()
+                .map(|i| ProfileEntry {
+                    name: i.name.clone(),
+                    description: i.description.clone(),
+                    extends: i.extends.clone(),
+                    source: i.path.display().to_string(),
+                    matches: matching.contains(&i.name),
+                })
+                .collect(),
+            dirs: profiles.dirs.iter().map(|d| d.display().to_string()).collect(),
+            warnings: profiles.warnings,
+        }))
     }
 
     /// Speaker diarization only: who spoke when.
@@ -191,7 +272,8 @@ impl ServerHandler for MeetingsServer {
             )
             .with_instructions(
                 "Local meeting transcription with speaker diarization. `transcribe` writes a WebVTT (+ JSON \
-                 metadata) next to the recording and returns the paths; read the VTT for the text. Runs take \
+                 metadata) next to the recording and returns the paths; read the VTT for the text. `profiles` \
+                 lists settings presets; pass one as `profile` when it matches the recording. Runs take \
                  roughly 5-15 % of the recording length on Apple Silicon. Models must be downloaded once with \
                  `mo-meetings models download`.",
             )
@@ -209,15 +291,6 @@ fn absolute(p: &str) -> Result<PathBuf, String> {
         return Err(message(Error::InvalidInput("empty path".into())));
     }
     std::path::absolute(p).map_err(|e| message(Error::InvalidInput(format!("bad path {}: {e}", p.display()))))
-}
-
-fn parse_language(l: Option<&str>) -> Result<Option<String>, String> {
-    match l.map(str::trim) {
-        None | Some("") => Ok(Config::default().asr.language),
-        Some("auto") => Ok(None),
-        Some(l) if l.len() == 2 && l.chars().all(|c| c.is_ascii_lowercase()) => Ok(Some(l.to_string())),
-        Some(l) => Err(message(Error::InvalidInput(format!("invalid language `{l}` (use a 2-letter code or `auto`)")))),
-    }
 }
 
 /// Share of the 0-100 progress scale per stage (diarization and ASR dominate).
@@ -246,6 +319,7 @@ fn progress_point(p: &Progress) -> (f64, String) {
     match *p {
         Progress::Started(s) => (stage_range(s).0, format!("{}…", stage_name(s))),
         Progress::Finished(s, secs) => (stage_range(s).1, format!("{} done in {secs:.1} s", stage_name(s))),
+        Progress::Warning(ref w) => (0.0, format!("warning: {w}")),
         Progress::Chunk { done, total, audio_done, audio_total } => {
             let frac = if audio_total > 0.0 { (audio_done / audio_total).clamp(0.0, 1.0) } else { 1.0 };
             let (a, b) = stage_range(Stage::Transcribe);
@@ -337,14 +411,6 @@ mod tests {
         assert!(values.windows(2).all(|w| w[0] <= w[1]), "{values:?}");
         assert_eq!(values.first(), Some(&0.0));
         assert_eq!(values.last(), Some(&100.0));
-    }
-
-    #[test]
-    fn language_defaults_and_validation() {
-        assert_eq!(parse_language(None).unwrap(), Some("cs".into()));
-        assert_eq!(parse_language(Some("auto")).unwrap(), None);
-        assert_eq!(parse_language(Some("en")).unwrap(), Some("en".into()));
-        assert!(parse_language(Some("english")).is_err());
     }
 
     #[test]

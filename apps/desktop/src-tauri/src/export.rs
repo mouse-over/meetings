@@ -77,6 +77,7 @@ mod tests {
                 audio_duration_s: 3.25,
                 decoder: None,
                 model: "whisper-large-v3-turbo".into(),
+                profile: None,
                 language: Some("cs".into()),
                 prompt: false,
                 num_speakers: 2,

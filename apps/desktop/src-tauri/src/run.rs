@@ -45,6 +45,9 @@ pub enum ProgressEvent {
         stage: Stage,
         seconds: f64,
     },
+    Warning {
+        message: String,
+    },
 }
 
 impl From<Progress> for ProgressEvent {
@@ -55,6 +58,7 @@ impl From<Progress> for ProgressEvent {
                 Self::Chunk { done, total, audio_done, audio_total }
             }
             Progress::Finished(stage, seconds) => Self::Finished { stage, seconds },
+            Progress::Warning(message) => Self::Warning { message },
         }
     }
 }
@@ -252,6 +256,8 @@ mod tests {
         );
         let v = serde_json::to_value(ProgressEvent::from(Progress::Started(Stage::Diarize))).unwrap();
         assert_eq!(v, serde_json::json!({"kind": "started", "stage": "diarize"}));
+        let v = serde_json::to_value(ProgressEvent::from(Progress::Warning("long prompt".into()))).unwrap();
+        assert_eq!(v, serde_json::json!({"kind": "warning", "message": "long prompt"}));
     }
 
     mod ipc {
