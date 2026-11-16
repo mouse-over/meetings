@@ -180,26 +180,13 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
         _ => None,
     };
     let mut project = match &args.project {
-        Some(path) if path.exists() => {
-            let mut p = Project::open(path)?;
-            if let Some(input) = &args.input {
-                p.locate(input)?;
+        Some(path) => {
+            let (p, created) = Project::open_or_create(path, args.input.as_deref())?;
+            if created {
+                eprintln!("created project {}", p.path().display());
             }
             Some(p)
         }
-        Some(path) => match &args.input {
-            Some(input) => {
-                let p = Project::create(path, input)?;
-                eprintln!("created project {}", p.path().display());
-                Some(p)
-            }
-            None => {
-                return Err(invalid(format!(
-                    "project not found: {} (give the recording to create it)",
-                    path.display()
-                )));
-            }
-        },
         None => None,
     };
     let input = match (&project, &args.input) {

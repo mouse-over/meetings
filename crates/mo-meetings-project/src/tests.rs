@@ -113,6 +113,32 @@ fn creates_and_reopens_a_project_and_rejects_other_files() {
 }
 
 #[test]
+fn open_or_create_creates_once_then_opens_and_locates() {
+    let d = tmp("open-or-create");
+    let rec = d.join("meeting.mp4");
+    write_recording(&rec, 3);
+    let path = d.join("meeting.mom");
+
+    // Missing project and no recording: nothing to create it from, and no file is left behind.
+    let e = Project::open_or_create(&path, None).err().unwrap();
+    assert!(matches!(e, Error::Core(_)) && e.exit_code() == 2 && !path.exists(), "{e}");
+
+    let (_, created) = Project::open_or_create(&path, Some(&rec)).unwrap();
+    assert!(created);
+    let (p, created) = Project::open_or_create(&path, None).unwrap();
+    assert!(!created);
+    assert_eq!(p.recording().unwrap(), rec);
+
+    // The recording moved: given with the existing project, it is located; another file is rejected.
+    std::fs::rename(&rec, d.join("moved.mp4")).unwrap();
+    let (p, _) = Project::open_or_create(&path, Some(&d.join("moved.mp4"))).unwrap();
+    assert_eq!(p.recording().unwrap(), d.join("moved.mp4"));
+    let other = d.join("other.mp4");
+    write_recording(&other, 5);
+    assert!(matches!(Project::open_or_create(&path, Some(&other)), Err(Error::RecordingMismatch { .. })));
+}
+
+#[test]
 fn finds_a_moved_recording_and_checks_it_is_the_same_file() {
     let d = tmp("moved");
     std::fs::create_dir_all(d.join("a")).unwrap();

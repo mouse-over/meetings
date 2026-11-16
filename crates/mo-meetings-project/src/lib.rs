@@ -271,6 +271,26 @@ impl Project {
         Ok(p)
     }
 
+    /// Opens the project at `path`, or creates it for `recording` when it does not exist. With an existing
+    /// project, `recording` is optional; when given, the project is pointed at it (see [`Project::locate`]).
+    /// The flag is true when the project was created.
+    pub fn open_or_create(path: &Path, recording: Option<&Path>) -> Result<(Project, bool)> {
+        if path.exists() {
+            let mut p = Project::open(path)?;
+            if let Some(r) = recording {
+                p.locate(r)?;
+            }
+            return Ok((p, false));
+        }
+        match recording {
+            Some(r) => Ok((Project::create(path, r)?, true)),
+            None => Err(Error::Core(mo_meetings_core::Error::InvalidInput(format!(
+                "project not found: {} (give the recording to create it)",
+                path.display()
+            )))),
+        }
+    }
+
     fn connect(path: &Path) -> Result<Project> {
         let path = std::path::absolute(path)?;
         let conn = Connection::open(&path).map_err(|e| Error::Sqlite { path: path.clone(), source: e })?;
