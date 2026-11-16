@@ -50,7 +50,7 @@ A glossary prompt helps whisper with domain terms and names; it is sent with eve
 Schůzka o vývoji aplikace. Termíny: backend, frontend, deploy, pull request, sprint, backlog, Kubernetes.
 ```
 
-A prompt longer than whisper keeps (224 tokens for the large models) loses its start; the run warns and shows the
+A prompt longer than whisper keeps (223 tokens for the large models) loses its start; the run warns and shows the
 part that is ignored.
 
 ### Settings profiles

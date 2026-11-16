@@ -36,7 +36,7 @@ pub struct WhisperAsr {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PromptFit {
     pub tokens: usize,
-    /// Tokens whisper keeps: half of the text context (224 for the large models).
+    /// Tokens whisper keeps: half of the text context minus the previous-text marker (223 for the large models).
     pub budget: usize,
     /// The start of the prompt whisper.cpp drops (it keeps the last `budget` tokens).
     pub dropped: Option<String>,
@@ -83,7 +83,8 @@ impl WhisperAsr {
 
     /// Counts the prompt's tokens as whisper.cpp does for `initial_prompt` and shows what it drops.
     pub fn prompt_fit(&self, prompt: &str) -> Result<PromptFit> {
-        let budget = (self.ctx.n_text_ctx() / 2).max(0) as usize;
+        // whisper.cpp: `max_prompt_ctx - 1` tokens after the `<|startofprev|>` marker.
+        let budget = (self.ctx.n_text_ctx() / 2 - 1).max(0) as usize;
         // A BPE token covers at least one byte; the room avoids whisper.cpp's "too many tokens" error.
         let toks = self
             .ctx

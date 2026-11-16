@@ -330,9 +330,6 @@ impl Resolved {
             positive(v, k)?;
         }
         positive(c.search, "chunks.search")?;
-        if c.max_len.is_some_and(|x| x < 1.0) {
-            return Err(invalid(format!("{}: chunks.max_len must be at least 1 s", at())));
-        }
         let q = &f.cues;
         for (v, k) in [
             (q.max_pause, "cues.max_pause"),
@@ -369,6 +366,14 @@ impl Resolved {
         }
         apply_chunks(&self.chunks, &mut cfg.chunk_rules);
         apply_cues(&self.cues, &mut cfg.cue_rules);
+        // Chunking splits speech at `max_len - 2 * pad`; at zero or less it would never advance.
+        let r = &cfg.chunk_rules;
+        if r.max_len - 2.0 * r.pad < 1.0 {
+            return Err(invalid(format!(
+                "profile `{}`: chunks.max_len ({}) must exceed 2 × chunks.pad ({}) by at least 1 s",
+                self.name, r.max_len, r.pad
+            )));
+        }
         Ok(())
     }
 }
@@ -459,6 +464,17 @@ mod tests {
         assert_eq!(cfg.chunk_rules.max_gap, 2.0);
         assert_eq!(cfg.chunk_rules.max_len, ChunkRules::default().max_len);
         assert_eq!(cfg.cue_rules.max_duration, 6.0);
+    }
+
+    #[test]
+    fn chunk_length_must_leave_room_for_padding() {
+        let t = Tmp::new("chunk-len");
+        t.write("p/base.toml", "[chunks]\npad = 1.0\n");
+        t.write("p/short.toml", "extends = \"base\"\n[chunks]\nmax_len = 2.0\n");
+        t.write("p/ok.toml", "extends = \"base\"\n[chunks]\nmax_len = 20.0\n");
+        let ps = Profiles::load_from(&[t.0.join("p")]);
+        assert!(ps.resolve("short").unwrap().apply(&mut Config::default()).is_err());
+        assert!(ps.resolve("ok").unwrap().apply(&mut Config::default()).is_ok());
     }
 
     #[test]
