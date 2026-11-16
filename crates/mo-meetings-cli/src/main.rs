@@ -208,7 +208,7 @@ fn transcribe(args: TranscribeArgs) -> anyhow::Result<()> {
         (None, None) => return Err(invalid("no recording given")),
     };
     let output = args.output.clone().unwrap_or_else(|| input.with_extension("vtt"));
-    if output == input {
+    if std::path::absolute(&output)? == std::path::absolute(&input)? {
         return Err(invalid("output would overwrite the input"));
     }
     let mut cfg = Config { threads: args.threads as usize, ..Default::default() };
