@@ -71,7 +71,7 @@ jobs:
           name="mo-meetings-${{ steps.version.outputs.version }}-${{ matrix.target }}"
           mkdir -p "dist/$name"
           if [[ "$RUNNER_OS" == Windows ]]; then exe=.exe; fi
-          cp "target/release/mo-meetings$exe" "target/release/mo-meetings-mcp$exe" README.md NOTICE "dist/$name/"
+          cp "target/release/mo-meetings$exe" "target/release/mo-meetings-mcp$exe" README.md NOTICE LICENSE-MIT LICENSE-APACHE "dist/$name/"
           if [[ "$RUNNER_OS" == macOS ]]; then
             # The binary's rpath is @executable_path/onnxruntime, then @executable_path. build.rs only warns when
             # it cannot fetch Microsoft's onnxruntime; a release without it would be ~2.3x slower, so fail here.
