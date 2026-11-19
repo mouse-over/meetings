@@ -1,5 +1,6 @@
 mo-meetings (mouse-over meetings)
-Copyright (c) 2026 Vaclav Prokes.
+Copyright (c) 2026 Vaclav Prokes. Licensed under either of the MIT license (LICENSE-MIT) or the Apache License,
+Version 2.0 (LICENSE-APACHE), at your option.
 
 This software downloads and uses the following third-party models at runtime. They are not part of this
 repository; `mo-meetings models download` fetches them from the URLs below into the user cache and verifies their

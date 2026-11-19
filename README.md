@@ -181,3 +181,8 @@ the root `Cargo.toml` and merge; the tag is pushed the same way.
   [`RESULTS.md`](spikes/sherpa-diarization/RESULTS.md).
 
 No recordings, transcripts or outputs derived from them are stored in this repo (see `.gitignore`).
+
+## License
+
+Licensed under either of [MIT](LICENSE-MIT) or [Apache-2.0](LICENSE-APACHE), at your option. The downloaded models
+and linked libraries keep their own licenses, listed in [`NOTICE`](NOTICE).
